@@ -1,5 +1,24 @@
 from contextlib import asynccontextmanager
 
+# The editor's "Run Python File" button also uses the same environment setup.
+# This must run before importing any third-party application dependency.
+if __name__ == "__main__":
+    from pathlib import Path
+    from subprocess import call
+
+    raise SystemExit(
+        call(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(Path(__file__).with_name("run.ps1")),
+            ]
+        )
+    )
+
 from fastapi import FastAPI
 
 from app.common.config import get_settings

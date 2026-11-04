@@ -4,18 +4,28 @@
 
 ## 실행
 
-프로젝트 폴더의 PowerShell에서 실행합니다.
+Windows에 Python 3.11 이상이 설치되어 있어야 합니다. 새로 체크아웃한 경우에도 프로젝트 폴더의 PowerShell에서 아래 명령 하나로 실행합니다.
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python -m uvicorn main:app --reload
+.\run.cmd
 ```
 
-가상환경을 활성화하지 않고도 실행할 수 있습니다.
+실행 순서는 다음과 같습니다. 어느 단계든 실패하면 서버를 시작하지 않습니다.
+
+1. `.venv`가 없으면 생성합니다. 활성화 스크립트가 누락된 가상환경도 복구합니다.
+2. `.venv`를 활성화하고 프로젝트 가상환경의 Python인지 확인합니다.
+3. `.venv`의 pip로 `requirements.txt` 의존성을 확인·설치합니다.
+4. `.venv`의 Python으로 Uvicorn 서버를 실행합니다.
+
+이미 생성된 가상환경은 재사용합니다. 최초 의존성 설치에는 패키지 다운로드를 위한 인터넷 연결이 필요합니다. `run.cmd`는 실행하는 PowerShell 프로세스에만 스크립트 실행 정책을 지정합니다.
+
+VS Code에서는 **Ctrl+Shift+B**로 같은 실행 절차를 사용할 수 있습니다. **F5 → FastAPI (.venv)**는 환경 준비 작업을 먼저 실행한 뒤 가상환경 Python으로 디버깅합니다. `main.py`의 **Run Python File** 버튼도 동일한 실행 스크립트를 호출합니다. F5 디버깅에는 VS Code의 Python / Python Debugger 확장이 필요합니다.
+
+서버를 띄우지 않고 환경만 준비하거나 포트를 변경할 수도 있습니다.
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn main:app --reload
+.\run.cmd -SetupOnly
+.\run.cmd -Port 8001
 ```
 
 - Swagger: http://127.0.0.1:8000/docs
@@ -39,6 +49,8 @@ python -m uvicorn main:app --reload
 | 위치 | 역할 |
 | --- | --- |
 | `main.py` | FastAPI 생성, 시작 시 테이블 초기화, 라우터 등록 |
+| `run.cmd` / `run.ps1` | 가상환경 생성·활성화, 의존성 설치, 서버·테스트 실행 |
+| `.vscode/tasks.json` / `.vscode/launch.json` | 환경 준비를 먼저 수행하는 실행·디버깅 설정 |
 | `app/common/config.py` | 환경변수와 `.env` 설정 읽기 |
 | `app/common/database.py` | DB 연결과 개발용 테이블 초기화 |
 | `app/users/presentation/router.py` | HTTP 요청, Service 호출, 상태 코드·응답 반환 |
@@ -55,6 +67,7 @@ python -m uvicorn main:app --reload
 | `app/users/infrastructure/unit_of_work.py` | 커밋, 롤백, 연결 종료 구현 |
 | `app/users/bootstrap.py` | 실제 DB 구현체를 Service에 주입 |
 | `tests/test_users.py` | 임시 SQLite DB를 사용하는 저장·중복·롤백 검증 |
+| `tests/test_startup.py` | 새 가상환경 생성, 재사용, 활성화 스크립트 복구, 설치 실패 시 중단 검증 |
 
 ## 요청 흐름과 의존성
 
@@ -88,7 +101,7 @@ Swagger에서 `POST /api/v1/users`를 실행합니다.
 ## 검증
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\run.cmd -Test
 ```
 
 테스트마다 임시 DB를 만들고 종료 시 정리하므로 실제 `study.db`에 테스트 데이터를 남기지 않습니다.
