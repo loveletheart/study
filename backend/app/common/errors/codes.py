@@ -23,6 +23,11 @@ class ErrorCode(str, Enum):
     WEATHER_INVALID_RESPONSE = "WEATHER_INVALID_RESPONSE"
     WEATHER_RATE_LIMITED = "WEATHER_RATE_LIMITED"
     OUTFIT_INVALID_FORECAST = "OUTFIT_INVALID_FORECAST"
+    OUTFIT_LLM_NOT_CONFIGURED = "OUTFIT_LLM_NOT_CONFIGURED"
+    OUTFIT_LLM_UNAVAILABLE = "OUTFIT_LLM_UNAVAILABLE"
+    OUTFIT_LLM_MODEL_NOT_FOUND = "OUTFIT_LLM_MODEL_NOT_FOUND"
+    OUTFIT_LLM_TIMEOUT = "OUTFIT_LLM_TIMEOUT"
+    OUTFIT_LLM_INVALID_RESPONSE = "OUTFIT_LLM_INVALID_RESPONSE"
 
 
 @dataclass(frozen=True)
@@ -51,4 +56,9 @@ ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
     ErrorCode.WEATHER_INVALID_RESPONSE: ErrorSpec(502, "날씨 제공 서비스의 응답 형식 또는 데이터가 올바르지 않습니다."),
     ErrorCode.WEATHER_RATE_LIMITED: ErrorSpec(503, "날씨 제공 서비스의 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요."),
     ErrorCode.OUTFIT_INVALID_FORECAST: ErrorSpec(502, "옷차림 추천에 필요한 날씨 정보가 올바르지 않습니다."),
+    ErrorCode.OUTFIT_LLM_NOT_CONFIGURED: ErrorSpec(503, "STUDY_LLM_MODEL에 사용할 로컬 모델명을 설정해 주세요."),
+    ErrorCode.OUTFIT_LLM_UNAVAILABLE: ErrorSpec(503, "로컬 LLM 서버에 연결하거나 추천을 생성할 수 없습니다."),
+    ErrorCode.OUTFIT_LLM_MODEL_NOT_FOUND: ErrorSpec(503, "설정한 모델을 로컬 LLM 서버에서 찾을 수 없습니다."),
+    ErrorCode.OUTFIT_LLM_TIMEOUT: ErrorSpec(504, "로컬 LLM의 추천 생성 시간이 초과되었습니다."),
+    ErrorCode.OUTFIT_LLM_INVALID_RESPONSE: ErrorSpec(502, "로컬 LLM이 올바른 옷차림 응답을 생성하지 못했습니다."),
 })

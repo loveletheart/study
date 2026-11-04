@@ -22,9 +22,23 @@ class OutfitForecast:
 
 
 @dataclass(frozen=True)
+class RecommendationEngine:
+    provider: str
+    model: str
+    prompt_version: str
+
+
+@dataclass(frozen=True)
+class GeneratedOutfits:
+    recommendations: tuple[OutfitRecommendation, ...]
+    engine: RecommendationEngine
+
+
+@dataclass(frozen=True)
 class TodayOutfitResult:
     forecast: OutfitForecast
     recommendation: OutfitRecommendation
+    engine: RecommendationEngine
 
 
 @dataclass(frozen=True)
@@ -33,3 +47,4 @@ class WeeklyOutfitResult:
     daily: tuple[OutfitRecommendation, ...]
     wardrobe: WeeklyWardrobe
     summary: str
+    engine: RecommendationEngine

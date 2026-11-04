@@ -1,77 +1,85 @@
-# 날씨 기반 옷차림 추천
+# 로컬 LLM 옷차림 추천
 
-선택한 지역의 오늘·7일 예보로 베스트·워스트 옷차림과 구성 이유를 반환합니다. 기존 날씨 서비스와 캐시를 재사용합니다. 이미지, 인기 순위, 사용자 취향과 보유 의류는 아직 연동하지 않습니다.
+오늘·7일 예보를 로컬 모델에 보내 베스트·워스트 옷차림과 구성 이유를 생성합니다. 고정 `BANDS` 의류 목록은 제거했습니다. 현재는 Ollama를 지원하며 모델 설치·다운로드는 자동 실행하지 않습니다. 이미지, 인기 순위, 개인 취향과 보유 의류는 후속 작업입니다.
 
 ## 계층과 흐름
 
+날씨 조회 → 원본 예보 검증 → LLM 요청 → 생성 JSON 검증 → 원본 날씨 결합 → 공통 응답 순서입니다. 오늘은 하루, 주간은 7일을 한 번의 추론 요청으로 전달합니다.
+
 | 파일 | 역할 |
 | --- | --- |
-| `presentation/router.py` | 좌표 입력과 공통 API 응답 |
-| `presentation/schemas.py` | Swagger 필드 설명과 결과 변환 |
-| `application/services.py` | 예보 날짜 검증, 오늘·주간 결과 구성 |
-| `application/ports.py` | 추천에 필요한 날씨 조회 계약 |
-| `application/dto.py` | 프레임워크와 무관한 조회 결과 |
-| `domain/models.py` | 추천용 날씨와 의류 구성 |
-| `domain/rules.py` | 온도별 의류, 강수·눈·바람·일교차 규칙 |
-| `infrastructure/weather_reader.py` | 기존 WeatherService의 예보를 추천용 모델로 변환 |
-| `bootstrap.py` | 날씨 조회 구현과 추천 서비스 연결 |
+| `presentation/router.py`, `schemas.py` | API 입력·출력과 Swagger 설명 |
+| `application/services.py` | 조회·생성 절차, 날짜·원본 날씨 일치 확인 |
+| `application/ports.py` | OutfitWeatherReader와 OutfitRecommender 계약 |
+| `application/dto.py` | 예보·생성 결과·추론 제공사 정보 |
+| `domain/models.py`, `rules.py` | 날씨·의류 모델, 온도 기준과 주간 의류 집계 |
+| `infrastructure/weather_reader.py` | 기존 WeatherService와 캐시 재사용 |
+| `infrastructure/ollama_client.py` | Ollama HTTP 요청과 통신 오류 처리 |
+| `infrastructure/ollama_recommender.py` | 생성 결과 검증과 도메인 변환 |
+| `infrastructure/llm_schemas.py` | 모델이 반환해야 하는 JSON 스키마 |
+| `infrastructure/prompts.py` | 한국어 추천 프롬프트와 날씨 입력 구성 |
+| `bootstrap.py` | 날씨 조회와 로컬 LLM을 서비스에 주입 |
 
-Router → OutfitService → OutfitWeatherReader의 실제 구현인 WeatherServiceReader → WeatherService 순서로 조회합니다. 추천의 Domain·Application은 weather 모듈, FastAPI, Pydantic을 import하지 않습니다. DB와 새로운 외부 HTTP 클라이언트는 필요하지 않습니다.
+Domain·Application은 weather 모듈·FastAPI·Pydantic·Ollama를 import하지 않습니다. 추론 서버를 바꾸려면 OutfitRecommender를 구현하고 bootstrap의 연결을 교체합니다. 현재 구현을 LM Studio/vLLM에 그대로 연결하는 호환 기능은 아직 없습니다.
 
-## API
+## 로컬 연결 준비
 
-`run.cmd` 실행 후 `/docs`의 outfits 항목에서 호출합니다.
+1. [Ollama Windows 안내](https://docs.ollama.com/windows)에 따라 서버를 별도로 준비합니다.
+2. 사용할 모델을 직접 선택·준비하고 `ollama list`에서 정확한 모델명을 확인합니다. JSON 스키마 출력과 한국어 생성이 가능한 모델로 실제 결과를 확인해야 합니다.
+3. 프로젝트 루트의 `.env.example`을 `.env`로 복사하고 다음 값을 설정합니다. `STUDY_LLM_MODEL`에는 설치한 모델명을 입력합니다.
+
+```dotenv
+STUDY_LLM_BASE_URL=http://127.0.0.1:11434
+STUDY_LLM_MODEL=
+STUDY_LLM_TIMEOUT_SECONDS=180
+STUDY_LLM_CONTEXT_SIZE=16384
+```
+
+기본 주소는 FastAPI가 실행되는 컴퓨터의 Ollama입니다. 모델명은 자동 선택하지 않습니다. 모델 미설정 상태에서도 서버와 날씨 API는 사용할 수 있으며 옷차림 API는 안내용 503을 반환합니다. 설정 변경 후 FastAPI를 재시작합니다.
+
+현재 요청은 `/api/chat`, `stream: false`, JSON 스키마 `format`을 사용합니다. 생성 온도는 0.3, 출력 토큰 상한은 8192이며 요청 문맥 길이는 환경변수로 조절합니다. 문맥을 늘리면 메모리 사용도 증가합니다. 주간 JSON이 잘리거나 느리면 모델·문맥 길이·대기 시간을 함께 조정해야 합니다. 코드에서 모델을 내려받거나 Ollama를 실행하지는 않습니다.
+
+## API와 응답
+
+`run.cmd` 실행 후 `/docs`의 outfits 항목에서 호출합니다. 지역은 기존 `/api/v1/weather/locations`에서 검색합니다.
 
 | API | 역할 |
 | --- | --- |
 | `GET /api/v1/outfits/today?latitude=37.5665&longitude=126.978` | 오늘의 추천·비추천 옷차림과 이유 |
 | `GET /api/v1/outfits/weekly?latitude=37.5665&longitude=126.978` | 오늘부터 7일 추천과 공통 준비 의류 |
 
-지역은 기존 `/api/v1/weather/locations`에서 검색하고 선택한 위도·경도를 사용합니다. 좌표는 필수입니다. 날짜는 한국 시간 기준이며 주간 예보는 오늘부터 연속된 7일이어야 합니다.
+공통 `code`, `message`, `data`, `details` 형식과 API 경로는 유지합니다. 기존 `data.rule_version`은 제거하고 `data.engine`으로 변경했습니다.
 
-모든 응답은 `code`, `message`, `data`, `details` 형식입니다.
-
-| 성공 응답의 data 필드 | 의미 |
+| data 필드 | 의미 |
 | --- | --- |
-| `coordinates`, `timezone`, `fetched_at` | 요청 위치·시간대·원본 날씨 조회 시각 |
-| `provider`, `source_url` | 화면에도 표시할 날씨 출처 |
-| `rule_version`, `notice` | 추천 규칙 버전과 참고 안내 |
-| `recommendation` | 오늘 응답의 추천 결과 |
+| `coordinates`, `timezone`, `fetched_at` | 요청 위치·한국 시간대·원본 날씨 조회 시각 |
+| `provider`, `source_url` | 날씨 제공사와 출처 |
+| `engine.provider`, `engine.model`, `engine.prompt_version` | 옷차림 생성 제공사·모델명·프롬프트 버전 |
+| `recommendation` | 오늘의 날씨·온도 기준·best·worst·추천 이유·비추천 이유·참고 사항 |
 | `daily` | 주간 응답의 날짜별 추천 7개 |
-| `wardrobe` | 날짜별 베스트 의류를 종류별로 모은 목록. 중복은 제거하며 개수는 산정하지 않음 |
-| `summary` | 주간 전체 최저·최고기온과 준비 안내 |
+| `wardrobe` | 주간 베스트 의류 종류. 동일 문자열을 중복 제거하며 수량은 산정하지 않음 |
+| `summary` | 서버가 원본 예보로 구성한 주간 최저·최고기온 안내 |
 
-각 추천에는 `weather`, `temperature_basis`, `reference_temperature_c`, `best`, `worst`, `reasons`, `avoid_reasons`, `precautions`가 있습니다. best·worst는 상의·하의·겉옷·신발·추가 준비물로 구성됩니다. 이미지 대신 텍스트로 제공하며 worst는 날씨 적합성 기준입니다.
+## 생성과 검증 기준
 
-## 초기 추천 규칙 v1.0
+- 최저·최고 체감온도가 모두 있으면 체감온도를 사용합니다. 하나라도 없으면 실제 기온을 기준으로 지정하고 이유를 덧붙입니다. 원본의 null 값은 유지합니다.
+- LLM에는 기온·체감온도·비·눈·바람·자외선·날씨 한글 설명과 출력 스키마를 보냅니다. 모델은 의류와 설명만 생성합니다.
+- 날짜·개수·순서·필수 필드·문자열 길이와 타입을 검증하고 동일한 베스트·워스트는 거부합니다. 모델이 날씨나 추가 필드를 반환해 원본을 덮어쓸 수 없습니다.
+- JSON 검증은 형식과 원본 데이터 보존을 확인합니다. 자유 문장에 담긴 판단의 정확성과 모델별 추천 품질까지 보장하는 것은 아닙니다.
+- LLM 실패 시 고정 의류·샘플 응답으로 대체하지 않습니다. 서버는 정해진 오류를 반환합니다.
+- 날씨 캐시는 재사용하지만 생성 결과는 캐시하지 않습니다. 같은 날씨여도 모델·실행 시점에 따라 추천 문장이 달라질 수 있습니다.
 
-아래 임계값은 이 프로젝트의 초기 제품 규칙으로, 공식 기상·의학 기준이 아닙니다. 개인의 체감, 활동과 예보 변화에 따라 달라질 수 있습니다.
+## 오류와 테스트
 
-최저·최고 체감온도가 모두 있으면 체감온도를 사용합니다. 하나라도 없으면 두 값 모두 실제 기온으로 대체하고 `temperature_basis: temperature`와 사유를 반환합니다. 원본 선택 정보의 null은 유지합니다. 바람 때문에 체감온도를 다시 낮추는 보정은 하지 않습니다.
+| 코드 | HTTP | 원인 |
+| --- | --- | --- |
+| `OUTFIT_LLM_NOT_CONFIGURED` | 503 | 모델명 미설정 |
+| `OUTFIT_LLM_MODEL_NOT_FOUND` | 503 | Ollama가 모델을 찾지 못함(404) |
+| `OUTFIT_LLM_UNAVAILABLE` | 503 | 서버 연결 실패·추론 오류 |
+| `OUTFIT_LLM_TIMEOUT` | 504 | 추론 응답 시간 초과 |
+| `OUTFIT_LLM_INVALID_RESPONSE` | 502 | 잘못된 JSON·날짜·구성 또는 출력 잘림 |
+| `OUTFIT_INVALID_FORECAST` | 502 | 잘못된 추천용 날씨·7일 날짜 |
 
-낮 기본 구성은 선택한 최고 온도로 정합니다.
+날씨 조회 오류는 기존 WEATHER_* 코드로 전파합니다. 프로젝트 루트에서 `run.cmd -Test`로 검증합니다. `test_outfits.py`, `test_ollama.py`는 모의 LLM·합성 예보로 요청 구성·JSON 검증·오류·날짜·캐시 공유를 확인합니다. 실제 Ollama 서버와 모델의 생성 품질은 별도로 검증합니다.
 
-| 온도 | 기본 상의·하의·겉옷 |
-| --- | --- |
-| 28℃ 이상 | 통풍 반팔·가벼운 반바지·겉옷 없음 |
-| 23℃ 이상, 28℃ 미만 | 반팔·얇은 긴바지·겉옷 없음 |
-| 20℃ 이상, 23℃ 미만 | 얇은 긴팔·면바지·얇은 가디건 |
-| 17℃ 이상, 20℃ 미만 | 긴팔·긴바지·가디건 |
-| 12℃ 이상, 17℃ 미만 | 니트·긴바지·재킷 |
-| 9℃ 이상, 12℃ 미만 | 도톰한 니트·긴바지·코트 |
-| 5℃ 이상, 9℃ 미만 | 보온 이너·니트·기모 바지·두꺼운 코트 |
-| 5℃ 미만 | 보온 이너·니트·기모 바지·패딩·장갑·목도리 |
-
-- 최저·최고 온도의 구간이 다르거나 실제 일교차가 10℃ 이상이면 아침·저녁 겉옷을 포함하고 낮에 벗어 조절하도록 안내합니다.
-- 강수확률 60% 이상, 누적 강수량 0mm 초과 또는 비 관련 WMO 코드이면 우산·생활방수 신발을 포함합니다. 확률만으로 비를 확정하지 않습니다.
-- 눈 관련 WMO 코드 또는 적설량 0cm 초과이면 눈길용 방수·미끄럼 방지 신발을 우선합니다.
-- 최대 풍속 8m/s 이상이면 겉옷을 검토합니다. 겉옷이 없거나 가디건이면 바람막이로 바꾸고 기존 보온 겉옷은 유지합니다.
-- 최대 자외선 지수 6 이상이면 모자를 포함합니다.
-- 강수확률·풍속이 없으면 정보 누락을 안내합니다. 모르는 값을 맑음·무풍·0으로 바꾸지 않습니다.
-- 예상 최고 기준 온도가 23℃ 이상이면 두꺼운 보온 조합을, 그 미만이면 반팔·반바지 조합을 워스트로 제시합니다. 비·눈에는 신발의 비추천 이유도 추가합니다.
-
-## 오류와 검증
-
-날씨 조회의 좌표·연결·타임아웃·데이터 오류는 기존 공통 오류 코드와 HTTP 상태로 전파합니다. 샘플 날씨나 임의 추천으로 대체하지 않습니다. 추천용 온도 범위가 잘못됐거나 연속된 7일 예보가 아니면 `OUTFIT_INVALID_FORECAST`(502)를 반환합니다.
-
-프로젝트 루트에서 `run.cmd -Test`를 실행합니다. `tests/test_outfits.py`는 구간 경계, 체감온도 누락, 비·눈·바람·일교차, 캐시 공유, 한국 날짜, 오류 전파, 공통 응답과 Swagger를 합성 데이터로 검증합니다. 실제 외부 통신은 별도 확인해야 합니다.
+공식 문서: [채팅 API](https://docs.ollama.com/api/chat), [구조화 출력](https://docs.ollama.com/capabilities/structured-outputs), [문맥 길이](https://docs.ollama.com/context-length).

@@ -11,6 +11,11 @@ from app.outfits.presentation.schemas import TodayOutfitResponse, WeeklyOutfitRe
 
 router = APIRouter(prefix="/outfits", tags=["outfits"], responses=error_responses(
     ErrorCode.OUTFIT_INVALID_FORECAST,
+    ErrorCode.OUTFIT_LLM_NOT_CONFIGURED,
+    ErrorCode.OUTFIT_LLM_UNAVAILABLE,
+    ErrorCode.OUTFIT_LLM_MODEL_NOT_FOUND,
+    ErrorCode.OUTFIT_LLM_TIMEOUT,
+    ErrorCode.OUTFIT_LLM_INVALID_RESPONSE,
     ErrorCode.WEATHER_INVALID_QUERY,
     ErrorCode.WEATHER_INVALID_RESPONSE,
     ErrorCode.WEATHER_UNAVAILABLE,
@@ -25,7 +30,7 @@ Longitude = Annotated[float, Query(ge=-180, le=180, allow_inf_nan=False, descrip
 @router.get(
     "/today", response_model=ApiResponse[TodayOutfitResponse],
     summary="오늘 옷차림 추천", operation_id="get_today_outfit",
-    description="오늘 예보를 바탕으로 베스트·워스트 옷차림과 추천 이유를 제공합니다.",
+    description="오늘 예보를 로컬 LLM에 전달해 베스트·워스트 옷차림과 추천 이유를 생성합니다.",
     response_description="오늘 옷차림, 판단에 사용한 날씨와 준비물",
 )
 def get_today(latitude: Latitude, longitude: Longitude, service: OutfitServiceDependency) -> ApiResponse[TodayOutfitResponse]:
@@ -37,7 +42,7 @@ def get_today(latitude: Latitude, longitude: Longitude, service: OutfitServiceDe
 @router.get(
     "/weekly", response_model=ApiResponse[WeeklyOutfitResponse],
     summary="7일 옷차림 추천", operation_id="get_weekly_outfits",
-    description="오늘부터 7일간 날짜별 옷차림과 중복 없는 주간 준비 의류를 제공합니다.",
+    description="7일 예보를 로컬 LLM에 한 번에 전달해 날짜별 옷차림과 주간 준비 의류를 제공합니다.",
     response_description="7일 추천, 주간 준비 의류와 기온 요약",
 )
 def get_weekly(latitude: Latitude, longitude: Longitude, service: OutfitServiceDependency) -> ApiResponse[WeeklyOutfitResponse]:

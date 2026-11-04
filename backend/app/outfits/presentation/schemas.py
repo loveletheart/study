@@ -29,6 +29,7 @@ class OutfitWeatherResponse(AttributeResponse):
     wind_speed_m_s: float | None = Field(description="하루 최대 풍속(m/s). 미제공 시 null")
     uv_index: float | None = Field(description="하루 최대 자외선 지수. 미제공 시 null")
     weather_code: int = Field(description="그날의 대표 WMO 날씨 코드")
+    description: str = Field(description="날씨 서비스가 제공한 코드의 한글 설명")
 
 
 class OutfitLookResponse(AttributeResponse):
@@ -43,7 +44,7 @@ class OutfitRecommendationResponse(AttributeResponse):
     date: Date = Field(description="추천 날짜(Asia/Seoul)")
     weather: OutfitWeatherResponse = Field(description="추천 판단에 사용한 일별 예보")
     temperature_basis: TemperatureBasis = Field(description="체감온도 우선. 최저·최고 체감온도 중 하나라도 없으면 실제 기온 사용")
-    reference_temperature_c: float = Field(description="낮 기본 옷차림을 고른 예상 최고 체감온도 또는 최고기온(°C)")
+    reference_temperature_c: float = Field(description="모델에 전달한 낮 기준 최고 체감온도 또는 최고기온(°C). 최저 온도와 함께 판단합니다.")
     best: OutfitLookResponse = Field(description="날씨에 맞는 베스트 옷차림")
     worst: OutfitLookResponse = Field(description="그날 피하는 편이 좋은 워스트 옷차림")
     reasons: list[str] = Field(description="베스트 옷차림의 구성 이유")
@@ -59,13 +60,19 @@ class WeeklyWardrobeResponse(AttributeResponse):
     accessories: list[str] = Field(description="이번 7일에 필요한 추가 준비물. 중복 제외")
 
 
+class RecommendationEngineResponse(AttributeResponse):
+    provider: str = Field(description="옷차림 생성 제공사. 현재 ollama")
+    model: str = Field(description="추천에 사용한 로컬 모델명")
+    prompt_version: str = Field(description="추천 프롬프트 버전")
+
+
 class OutfitMetadataResponse(AttributeResponse):
     coordinates: OutfitCoordinatesResponse = Field(description="요청한 위치의 위도·경도")
     timezone: str = Field(description="예보와 추천 날짜의 시간대. Asia/Seoul")
     fetched_at: datetime = Field(description="서버가 날씨 데이터를 가져온 시각. 캐시 재사용 시 최초 조회 시각")
     provider: str = Field(description="날씨 데이터 제공사")
     source_url: str = Field(description="화면에 표시할 날씨 데이터 출처 링크")
-    rule_version: str = Field(default="1.0", description="옷차림 추천 규칙 버전")
+    engine: RecommendationEngineResponse = Field(description="실제 옷차림을 생성한 LLM 정보")
     notice: str = Field(default="날씨 기반의 일반적인 참고 추천입니다. 개인의 체감과 실제 예보에 맞춰 조절하세요.", description="추천 이용 안내")
 
 
@@ -83,7 +90,7 @@ class TodayOutfitResponse(OutfitMetadataResponse):
     @classmethod
     def from_result(cls, result: TodayOutfitResult) -> "TodayOutfitResponse":
         """오늘 추천 결과를 응답으로 변환"""
-        return cls.model_validate({**_metadata(result.forecast), "recommendation": result.recommendation})
+        return cls.model_validate({**_metadata(result.forecast), "engine": result.engine, "recommendation": result.recommendation})
 
 
 class WeeklyOutfitResponse(OutfitMetadataResponse):
@@ -96,5 +103,5 @@ class WeeklyOutfitResponse(OutfitMetadataResponse):
         """주간 추천 결과를 응답으로 변환"""
         return cls.model_validate({
             **_metadata(result.forecast), "daily": result.daily,
-            "wardrobe": result.wardrobe, "summary": result.summary,
+            "wardrobe": result.wardrobe, "summary": result.summary, "engine": result.engine,
         })

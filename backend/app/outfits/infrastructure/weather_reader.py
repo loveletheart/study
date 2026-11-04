@@ -26,6 +26,7 @@ class WeatherServiceReader:
                 wind_speed_m_s=day.wind_speed_max_m_s,
                 uv_index=day.uv_index_max,
                 weather_code=day.weather_code,
+                description=day.description,
             ) for day in forecast.daily)
         except (TypeError, ValueError) as exc:
             raise OutfitForecastError() from exc

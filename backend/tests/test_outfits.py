@@ -1,4 +1,4 @@
-"""외부 통신 없이 옷차림 규칙·날씨 연결·응답 계약 검증."""
+"""모의 로컬 LLM으로 날씨 연결과 옷차림 응답 검증."""
 
 import copy
 import json
@@ -14,7 +14,8 @@ from app.common.errors.handlers import handle_app_error
 from app.outfits.application.exceptions import OutfitForecastError
 from app.outfits.application.services import OutfitService
 from app.outfits.domain.models import OutfitWeather, TemperatureBasis
-from app.outfits.domain.rules import build_weekly_wardrobe, recommend_outfit
+from app.outfits.infrastructure.ollama_client import OllamaClient
+from app.outfits.infrastructure.ollama_recommender import OllamaOutfitRecommender
 from app.outfits.infrastructure.weather_reader import WeatherServiceReader
 from app.outfits.presentation.router import Latitude, Longitude, get_today, get_weekly
 from app.outfits.presentation.schemas import TodayOutfitResponse
@@ -32,127 +33,21 @@ def weather(temperature: float = 20, **changes) -> OutfitWeather:
         date=date(2026, 11, 4), temperature_min_c=temperature, temperature_max_c=temperature,
         apparent_temperature_min_c=None, apparent_temperature_max_c=None,
         precipitation_probability_percent=0, precipitation_mm=0, snowfall_cm=0,
-        wind_speed_m_s=0, uv_index=0, weather_code=0,
+        wind_speed_m_s=0, uv_index=0, weather_code=0, description="맑음",
     )
     return replace(baseline, **changes)
 
 
-class OutfitRuleTests(unittest.TestCase):
-    def test_temperature_boundaries_select_the_documented_clothes(self):
-        """기온 구간 경계에서 상의와 겉옷 선택 확인"""
-        cases = [
-            (28, "통풍이 좋은 반팔", None), (27.9, "반팔", None),
-            (23, "반팔", None), (22.9, "얇은 긴팔", "얇은 가디건"),
-            (20, "얇은 긴팔", "얇은 가디건"), (19.9, "긴팔", "가디건"),
-            (17, "긴팔", "가디건"), (16.9, "니트", "재킷"),
-            (12, "니트", "재킷"), (11.9, "도톰한 니트", "코트"),
-            (9, "도톰한 니트", "코트"), (8.9, "보온 이너와 니트", "두꺼운 코트"),
-            (5, "보온 이너와 니트", "두꺼운 코트"), (4.9, "보온 이너와 니트", "패딩"),
-        ]
-        for temperature, top, outerwear in cases:
-            with self.subTest(temperature=temperature):
-                result = recommend_outfit(weather(temperature))
-                self.assertEqual((result.best.top, result.best.outerwear), (top, outerwear))
-                self.assertTrue(result.reasons)
-                self.assertTrue(result.avoid_reasons)
-                self.assertNotEqual(result.best, result.worst)
-
-    def test_apparent_temperature_takes_priority_without_wind_subtraction(self):
-        """체감온도를 우선 사용하고 풍속으로 기온을 중복 보정하지 않음"""
-        result = recommend_outfit(weather(
-            25, apparent_temperature_min_c=4, apparent_temperature_max_c=4, wind_speed_m_s=10,
-        ))
-        self.assertEqual(result.temperature_basis, TemperatureBasis.APPARENT)
-        self.assertEqual(result.reference_temperature_c, 4)
-        self.assertEqual(result.best.outerwear, "패딩")
-
-    def test_missing_either_apparent_value_falls_back_to_actual_temperature(self):
-        """체감온도 하나가 누락돼도 실제 기온과 기준을 명시"""
-        for low, high in [(None, None), (-10, None), (None, -10)]:
-            with self.subTest(low=low, high=high):
-                result = recommend_outfit(weather(28, apparent_temperature_min_c=low, apparent_temperature_max_c=high))
-                self.assertEqual(result.temperature_basis, TemperatureBasis.ACTUAL)
-                self.assertEqual(result.reference_temperature_c, 28)
-                self.assertIsNone(result.best.outerwear)
-                self.assertTrue(any("실제 기온" in reason for reason in result.reasons))
-
-    def test_cold_morning_adds_removable_outerwear_and_accessories(self):
-        """아침·낮 기온 차이에 맞춰 겉옷과 방한 준비물 추가"""
-        result = recommend_outfit(weather(28, temperature_min_c=4))
-        self.assertEqual(result.best.top, "통풍이 좋은 반팔")
-        self.assertEqual(result.best.outerwear, "패딩")
-        self.assertIn("장갑", result.best.accessories)
-        self.assertTrue(any("낮에는 겉옷을 벗어" in text for text in result.precautions))
-
-    def test_rain_probability_boundary_amount_and_weather_code(self):
-        """강수확률 경계·누적 강수량·날씨 코드로 우산 준비 판단"""
-        cases = [
-            ({"precipitation_probability_percent": 59}, False),
-            ({"precipitation_probability_percent": 60}, True),
-            ({"precipitation_mm": 0.1}, True),
-            ({"weather_code": 61}, True),
-        ]
-        for changes, needs_umbrella in cases:
-            with self.subTest(changes=changes):
-                result = recommend_outfit(weather(**changes))
-                self.assertEqual("우산" in result.best.accessories, needs_umbrella)
-                if needs_umbrella:
-                    self.assertIn("생활방수", result.best.shoes)
-                    self.assertTrue(any("확정이 아니" in text for text in result.precautions))
-
-    def test_snow_overrides_rain_shoes_and_explains_the_worst_choice(self):
-        """눈 예보 시 방수·미끄럼 방지 신발과 비추천 이유 제공"""
-        for changes in [{"weather_code": 71}, {"snowfall_cm": 1}]:
-            with self.subTest(changes=changes):
-                result = recommend_outfit(weather(0, precipitation_probability_percent=90, **changes))
-                self.assertEqual(result.best.shoes, "미끄럼 방지 방수 신발")
-                self.assertEqual(result.worst.shoes, "밑창이 매끄러운 신발")
-                self.assertTrue(any("눈길" in reason for reason in result.avoid_reasons))
-
-    def test_wind_and_uv_thresholds_add_only_the_needed_items(self):
-        """풍속·자외선 임계값에서 겉옷과 모자 추가"""
-        before = recommend_outfit(weather(28, wind_speed_m_s=7.9, uv_index=5.9))
-        after = recommend_outfit(weather(28, wind_speed_m_s=8, uv_index=6))
-        self.assertIsNone(before.best.outerwear)
-        self.assertNotIn("모자", before.best.accessories)
-        self.assertEqual(after.best.outerwear, "바람막이")
-        self.assertIn("모자", after.best.accessories)
-
-    def test_unknown_optional_metrics_remain_null_with_no_invented_rain(self):
-        """누락 정보를 0이나 비 예보로 바꾸지 않음"""
-        result = recommend_outfit(weather(
-            precipitation_probability_percent=None, precipitation_mm=None, snowfall_cm=None,
-            wind_speed_m_s=None, uv_index=None, weather_code=999,
-        ))
-        self.assertIsNone(result.weather.precipitation_probability_percent)
-        self.assertNotIn("우산", result.best.accessories)
-        self.assertTrue(any("강수확률 정보" in text for text in result.precautions))
-        self.assertTrue(any("풍속 정보" in text for text in result.precautions))
-
-    def test_invalid_weather_values_are_rejected(self):
-        """비정상 기온·확률·풍속·체감온도 범위 거부"""
-        for changes in [
-            {"temperature_min_c": float("nan")}, {"temperature_max_c": float("inf")},
-            {"temperature_min_c": 30}, {"precipitation_probability_percent": 101},
-            {"wind_speed_m_s": -1}, {"uv_index": -1},
-            {"apparent_temperature_min_c": 20, "apparent_temperature_max_c": 10},
-        ]:
-            with self.subTest(changes=changes), self.assertRaises(ValueError):
-                weather(**changes)
-
-    def test_repeated_recommendations_do_not_mutate_shared_clothing_rules(self):
-        """우천 추천이 다음 날의 기본 의류 구성을 바꾸지 않음"""
-        before = recommend_outfit(weather())
-        recommend_outfit(weather(weather_code=61, wind_speed_m_s=10))
-        self.assertEqual(recommend_outfit(weather()), before)
-
-    def test_weekly_wardrobe_deduplicates_items_and_omits_empty_outerwear(self):
-        """주간 준비물의 중복과 불필요한 null 제거"""
-        recommendations = (recommend_outfit(weather(28)),) * 7
-        wardrobe = build_weekly_wardrobe(recommendations)
-        self.assertEqual(wardrobe.tops, ("통풍이 좋은 반팔",))
-        self.assertEqual(wardrobe.outerwear, ())
-        self.assertEqual(wardrobe.accessories, ())
+def generated_content(dates: list[str], outerwear: str | None = "재킷") -> str:
+    """테스트에서만 사용하는 합성 LLM 응답 생성"""
+    return json.dumps({"days": [{
+        "date": day,
+        "best": {"top": "블루 셔츠", "bottom": "면바지", "outerwear": outerwear, "shoes": "생활방수 운동화", "accessories": ["우산"]},
+        "worst": {"top": "민소매", "bottom": "반바지", "outerwear": None, "shoes": "슬리퍼", "accessories": []},
+        "reasons": ["아침의 낮은 기온과 강수 가능성을 함께 고려한 구성입니다."],
+        "avoid_reasons": ["얇은 옷만 입으면 아침·저녁에 추울 수 있습니다."],
+        "precautions": ["외출 전 최신 예보를 확인하세요."],
+    } for day in dates]}, ensure_ascii=False)
 
 
 class OutfitIntegrationTests(unittest.TestCase):
@@ -165,7 +60,12 @@ class OutfitIntegrationTests(unittest.TestCase):
         provider = OpenMeteoProvider(self.http, TTLCache(600), clock=lambda: self.now)
         self.weather_service = WeatherService(provider)
         self.reader = WeatherServiceReader(self.weather_service)
-        self.service = OutfitService(self.reader)
+        self.llm = Mock(spec=OllamaClient)
+        self.llm.chat.side_effect = lambda model, messages, schema: generated_content([
+            day["date"] for day in json.loads(messages[1]["content"])["weather_days"]
+        ])
+        self.recommender = OllamaOutfitRecommender(self.llm, "test-local-model")
+        self.service = OutfitService(self.reader, self.recommender)
 
     def test_today_and_weekly_reuse_the_existing_weather_cache(self):
         """오늘·주간 옷차림과 날씨 API가 같은 예보 캐시 재사용"""
@@ -178,6 +78,8 @@ class OutfitIntegrationTests(unittest.TestCase):
         self.assertEqual((weekly.data.daily[-1].date - weekly.data.daily[0].date).days, 6)
         self.assertEqual(today.data.fetched_at, NOW)
         self.assertEqual(today.data.provider, "Open-Meteo")
+        self.assertEqual(self.llm.chat.call_count, 2)
+        self.assertEqual(self.llm.chat.call_args.args[2]["properties"]["days"]["minItems"], 7)
 
     def test_response_serialization_keeps_the_common_envelope_and_null_values(self):
         """공통 응답·중첩 의류·선택 값 null 직렬화 확인"""
@@ -190,7 +92,8 @@ class OutfitIntegrationTests(unittest.TestCase):
         recommendation = payload["data"]["recommendation"]
         self.assertEqual(recommendation["temperature_basis"], "temperature")
         self.assertIsNone(recommendation["weather"]["precipitation_probability_percent"])
-        self.assertEqual(payload["data"]["rule_version"], "1.0")
+        self.assertEqual(payload["data"]["engine"]["model"], "test-local-model")
+        self.assertNotIn("rule_version", payload["data"])
         self.assertEqual(TodayOutfitResponse.model_validate(payload["data"]), response.data)
 
     def test_today_uses_the_korean_date_even_when_utc_is_previous_day(self):
@@ -226,10 +129,11 @@ class OutfitIntegrationTests(unittest.TestCase):
                 reader = Mock()
                 reader.get_forecast.return_value = replace(snapshot, days=days)
                 with self.assertRaises(OutfitForecastError) as caught:
-                    OutfitService(reader).get_weekly(37, 127)
+                    OutfitService(reader, self.recommender).get_weekly(37, 127)
                 response = handle_app_error(Request({"type": "http"}), caught.exception)
                 self.assertEqual(response.status_code, 502)
                 self.assertEqual(json.loads(response.body)["code"], "OUTFIT_INVALID_FORECAST")
+        self.llm.chat.assert_not_called()
 
     def test_weather_adapter_converts_invalid_recommendation_input_to_a_public_error(self):
         """추천에 부적합한 체감온도 범위는 공통 업무 오류로 변환"""

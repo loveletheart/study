@@ -26,6 +26,7 @@ class OutfitWeather:
     wind_speed_m_s: float | None
     uv_index: float | None
     weather_code: int
+    description: str
 
     def __post_init__(self) -> None:
         """추천에 필요한 기온과 선택 값의 범위 검증"""

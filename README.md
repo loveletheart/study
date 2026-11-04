@@ -52,7 +52,9 @@ Python 코드는 `backend/`에 있고, `.venv`, `.env`, 실행 스크립트와 �
 | `GET /api/v1/outfits/today?latitude=37.5665&longitude=126.978` | 오늘의 베스트·워스트 옷차림과 추천 이유 |
 | `GET /api/v1/outfits/weekly?latitude=37.5665&longitude=126.978` | 오늘부터 7일 옷차림과 중복 없는 주간 준비 의류 |
 
-기존 날씨 조회와 캐시를 재사용합니다. 체감온도·기온·강수·바람·일교차를 기준으로 의류와 준비물을 구성하며, 판단 기준과 정보 누락 여부를 함께 반환합니다. 이미지와 인기 순위 연동은 후속 작업입니다. 계층·필드·초기 규칙은 [옷차림 기능 문서](backend/app/outfits/README.md)를 참고하세요.
+기존 날씨 조회와 캐시를 재사용하고 날씨를 로컬 LLM에 전달해 옷차림을 생성합니다. 현재 연동은 Ollama이며 `OutfitRecommender` 인터페이스로 다른 추론 서버를 연결할 수 있습니다. 사용 모델은 직접 설정하며 이미지와 인기 순위는 후속 작업입니다. 연결 방법과 응답 형식은 [옷차림 기능 문서](backend/app/outfits/README.md)를 참고하세요.
+
+옷차림 API를 사용하려면 Ollama 서버와 모델을 별도로 준비하고 `.env`의 `STUDY_LLM_MODEL`에 `ollama list`에 표시된 모델명을 입력하세요. 모델 미설정 시 옷차림 API는 `OUTFIT_LLM_NOT_CONFIGURED`(503)를 반환합니다. 서버가 모델을 자동 설치하거나 다운로드하지 않습니다.
 
 ## API 설명과 공통 오류
 
@@ -92,6 +94,10 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `STUDY_DATABASE_PATH` | `study.db` | SQLite 파일 경로 |
 | `STUDY_WEATHER_TIMEOUT_SECONDS` | `10` | 외부 날씨 API 제한 시간(0.1~30초) |
 | `STUDY_WEATHER_CACHE_TTL_SECONDS` | `600` | 날씨 캐시 유지 시간(0~3600초, 0은 캐시 해제) |
+| `STUDY_LLM_BASE_URL` | `http://127.0.0.1:11434` | Ollama 서버의 기본 주소 |
+| `STUDY_LLM_MODEL` | 빈 문자열 | 직접 준비한 로컬 모델명. 옷차림 API 사용 시 필수 |
+| `STUDY_LLM_TIMEOUT_SECONDS` | `180` | 추론 응답 대기 시간(1~600초) |
+| `STUDY_LLM_CONTEXT_SIZE` | `16384` | 요청 문맥 길이(2048~131072 정수). 모델·메모리에 맞춰 조절 |
 
 실제 환경변수가 `.env` 값보다 우선합니다. 상대 DB 경로는 프로젝트 루트 기준입니다. 서버 시작 시 테이블이 없으면 생성하고, 사용자 데이터는 DB 파일에 저장합니다. DB 파일과 `.env`는 Git에서 제외합니다.
 
@@ -108,7 +114,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `backend/app/common/database.py` | DB 연결과 개발용 테이블 초기화 |
 | `backend/app/common/responses.py` | 모든 API의 공통 응답 형식 |
 | `backend/app/common/errors/` | 공통 오류 코드·응답 모델·예외 핸들러·Swagger 오류 문서 |
-| `backend/app/outfits/` | 날씨 기반 옷차림 규칙·오늘/주간 조회·응답 처리 |
+| `backend/app/outfits/` | 날씨 기반 로컬 LLM 추천·오늘/주간 조회·응답 검증 |
 | `backend/app/users/presentation/router.py` | HTTP 요청, Service 호출, 상태 코드·응답 반환 |
 | `backend/app/users/presentation/schemas.py` | Pydantic 요청·응답 형식 |
 | `backend/app/users/application/services.py` | 사용자 등록·조회 절차와 트랜잭션 범위 |
