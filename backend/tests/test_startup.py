@@ -15,12 +15,13 @@ from unittest.mock import patch
 @unittest.skipUnless(sys.platform == "win32", "Windows startup scripts")
 class StartupTests(unittest.TestCase):
     def test_fresh_checkout_reuse_repair_and_dependency_failure(self) -> None:
-        project_root = Path(__file__).resolve().parents[1]
+        project_root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory(prefix="study startup ") as directory:
             checkout = Path(directory)
             shutil.copy2(project_root / "run.ps1", checkout / "run.ps1")
             # Bootstrap itself needs no third-party packages; keep this test offline.
-            requirements = checkout / "requirements.txt"
+            (checkout / "backend").mkdir()
+            requirements = checkout / "backend" / "requirements.txt"
             requirements.write_text("# bootstrap regression test\n", encoding="utf-8")
             env = {**os.environ, "PIP_NO_INDEX": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
 
@@ -83,7 +84,7 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(stopped.exception.code, 0)
         command = launch.call_args.args[0]
         self.assertEqual(command[0], "powershell.exe")
-        self.assertEqual(Path(command[-1]), main_path.with_name("run.ps1"))
+        self.assertEqual(Path(command[-1]), main_path.parent.parent / "run.ps1")
 
 
 if __name__ == "__main__":
