@@ -9,14 +9,17 @@ from app.users.infrastructure.repositories import SQLiteUserRepository
 
 
 class SQLiteUserUnitOfWork(UserUnitOfWork):
+    # DB 경로 보관
     def __init__(self, database_path: Path) -> None:
         self._database_path = database_path
 
+    # DB 연결과 저장소 준비
     def __enter__(self) -> "SQLiteUserUnitOfWork":
         self._connection = connect_database(self._database_path)
         self.users = SQLiteUserRepository(self._connection)
         return self
 
+    # 미커밋 변경 롤백 후 연결 종료
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
@@ -28,5 +31,6 @@ class SQLiteUserUnitOfWork(UserUnitOfWork):
         finally:
             self._connection.close()
 
+    # 변경 사항 커밋
     def commit(self) -> None:
         self._connection.commit()

@@ -13,6 +13,7 @@ class User:
     email: str
     id: UUID = field(default_factory=uuid4)
 
+    # 이름·이메일 검증 및 정규화
     def __post_init__(self) -> None:
         name = self.name.strip()
         # 이 예제에서는 이메일 전체를 대소문자 구분 없이 관리한다.

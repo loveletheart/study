@@ -22,6 +22,7 @@ class Coordinates:
     latitude: float
     longitude: float
 
+    # 위도·경도 범위 검증
     def __post_init__(self) -> None:
         if not isfinite(self.latitude) or not -90 <= self.latitude <= 90:
             raise ValueError("위도는 -90~90 범위여야 합니다.")
@@ -45,6 +46,7 @@ class Location:
 class WeatherDescription:
     weather_code: int
 
+    # 날씨 코드를 한글 설명으로 변환
     @property
     def description(self) -> str:
         return WEATHER_DESCRIPTIONS.get(self.weather_code, "알 수 없는 날씨")
@@ -76,10 +78,12 @@ class DailyForecast(WeatherDescription):
     uv_index_max: float | None
     weather_code: int
 
+    # 최고·최저기온으로 일교차 계산
     @property
     def temperature_range_c(self) -> float:
         return round(self.temperature_max_c - self.temperature_min_c, 1)
 
+    # 오늘 예보를 한글 문장으로 요약
     def summarize(self) -> str:
         summary = (
             f"{self.description}, 최저 {self.temperature_min_c:g}℃, "

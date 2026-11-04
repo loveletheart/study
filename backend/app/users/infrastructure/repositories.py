@@ -9,21 +9,25 @@ from app.users.infrastructure.models import user_from_row
 
 
 class SQLiteUserRepository:
+    # DB 연결 주입
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
 
+    # UUID 조건으로 사용자 조회
     def find_by_id(self, user_id: UUID) -> User | None:
         row = self._connection.execute(
             "SELECT id, name, email FROM users WHERE id = ?", (str(user_id),)
         ).fetchone()
         return user_from_row(row) if row is not None else None
 
+    # 이메일 조건으로 사용자 조회
     def find_by_email(self, email: str) -> User | None:
         row = self._connection.execute(
             "SELECT id, name, email FROM users WHERE email = ?", (email,)
         ).fetchone()
         return user_from_row(row) if row is not None else None
 
+    # 사용자 저장 및 이메일 중복 처리
     def add(self, user: User) -> None:
         try:
             self._connection.execute(
@@ -36,5 +40,5 @@ class SQLiteUserRepository:
                 exc.sqlite_errorcode == sqlite3.SQLITE_CONSTRAINT_UNIQUE
                 and "users.email" in str(exc)
             ):
-                raise DuplicateEmailError("이미 등록된 이메일입니다.") from exc
+                raise DuplicateEmailError() from exc
             raise

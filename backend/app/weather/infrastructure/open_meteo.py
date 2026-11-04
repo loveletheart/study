@@ -32,9 +32,8 @@ HOURLY_FIELDS = {
 }
 
 
-def _number(value, *, optional: bool = False, minimum: float | None = None, maximum: float | None = None) -> float | None:
-    if value is None and optional:
-        return None
+# 필수 숫자 검증: None이면 오류
+def _number(value: object, *, minimum: float | None = None, maximum: float | None = None) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
         raise ValueError("Invalid numeric weather value")
     if minimum is not None and value < minimum or maximum is not None and value > maximum:
@@ -42,12 +41,21 @@ def _number(value, *, optional: bool = False, minimum: float | None = None, maxi
     return float(value)
 
 
+# 선택 숫자 검증: None이면 정보 없음 유지
+def _optional_number(value: object, *, minimum: float | None = None, maximum: float | None = None) -> float | None:
+    if value is None:
+        return None
+    return _number(value, minimum=minimum, maximum=maximum)
+
+
+# 정수 형식과 최솟값 검증
 def _integer(value, *, minimum: int = 0) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ValueError("Invalid integer weather value")
     return value
 
 
+# 제공사 시각을 한국 시간으로 변환
 def _time(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     if parsed.tzinfo is not None:
@@ -55,6 +63,7 @@ def _time(value: str) -> datetime:
     return parsed.replace(tzinfo=KST)
 
 
+# 날씨 데이터 단위 검증
 def _validate_units(payload: dict, section: str, expected: dict) -> None:
     units = payload[f"{section}_units"]
     for field, unit in expected.items():
@@ -62,6 +71,7 @@ def _validate_units(payload: dict, section: str, expected: dict) -> None:
             raise ValueError(f"Unexpected unit for {section}.{field}")
 
 
+# 예보 배열 길이 검증
 def _arrays(section: dict, fields: dict, length: int) -> None:
     for field in ("time", *fields):
         if not isinstance(section[field], list) or len(section[field]) != length:
@@ -69,6 +79,7 @@ def _arrays(section: dict, fields: dict, length: int) -> None:
 
 
 class OpenMeteoProvider:
+    # HTTP 클라이언트와 캐시 주입
     def __init__(
         self,
         http: JsonHttpClient,
@@ -79,11 +90,13 @@ class OpenMeteoProvider:
         self._cache = cache
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
+    # 캐시를 이용해 지역 검색
     def search_locations(self, query: str, limit: int) -> tuple[Location, ...]:
         return self._cache.get_or_load(
             ("locations", query.casefold(), limit), lambda: self._load_locations(query, limit)
         )
 
+    # 지역 API 호출 후 위치 정보 변환
     def _load_locations(self, query: str, limit: int) -> tuple[Location, ...]:
         payload = self._http.get(GEOCODING_URL, {
             "name": query, "count": limit, "language": "ko", "format": "json", "countryCode": "KR",
@@ -112,8 +125,9 @@ class OpenMeteoProvider:
                 ))
             return tuple(locations[:limit])
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
-            raise WeatherProviderDataError("지역 검색 응답 형식이 올바르지 않습니다.") from exc
+            raise WeatherProviderDataError() from exc
 
+    # 좌표·날짜별 예보 캐시 조회
     def get_forecast(self, coordinates: Coordinates) -> WeatherForecast:
         # 날짜도 캐시 키에 포함해 한국 시간 자정 이후 어제 예보를 반환하지 않는다.
         today = self._clock().astimezone(KST).date()
@@ -122,6 +136,7 @@ class OpenMeteoProvider:
             lambda: self._load_forecast(coordinates),
         )
 
+    # 예보 API 호출 및 응답 검증
     def _load_forecast(self, coordinates: Coordinates) -> WeatherForecast:
         payload = self._http.get(FORECAST_URL, {
             "latitude": coordinates.latitude, "longitude": coordinates.longitude,
@@ -153,16 +168,17 @@ class OpenMeteoProvider:
             current_weather = CurrentWeather(
                 time=current_time,
                 temperature_c=_number(current["temperature_2m"]),
-                apparent_temperature_c=_number(current["apparent_temperature"], optional=True),
-                humidity_percent=_number(current["relative_humidity_2m"], optional=True, minimum=0, maximum=100),
-                precipitation_mm=_number(current["precipitation"], optional=True, minimum=0),
-                wind_speed_m_s=_number(current["wind_speed_10m"], optional=True, minimum=0),
+                apparent_temperature_c=_optional_number(current["apparent_temperature"]),
+                humidity_percent=_optional_number(current["relative_humidity_2m"], minimum=0, maximum=100),
+                precipitation_mm=_optional_number(current["precipitation"], minimum=0),
+                wind_speed_m_s=_optional_number(current["wind_speed_10m"], minimum=0),
                 weather_code=_integer(current["weather_code"]), is_day=bool(current["is_day"]),
             )
             return WeatherForecast(coordinates, current_weather, days, hours, fetched_at)
         except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as exc:
-            raise WeatherProviderDataError("날씨 예보의 날짜·단위 또는 데이터 형식이 올바르지 않습니다.") from exc
+            raise WeatherProviderDataError() from exc
 
+    # 일별 데이터를 날씨 객체로 변환
     @staticmethod
     def _parse_day(data: dict, i: int) -> DailyForecast:
         minimum = _number(data["temperature_2m_min"][i])
@@ -172,22 +188,23 @@ class OpenMeteoProvider:
         return DailyForecast(
             date=date.fromisoformat(data["time"][i]),
             temperature_min_c=minimum, temperature_max_c=maximum,
-            apparent_temperature_min_c=_number(data["apparent_temperature_min"][i], optional=True),
-            apparent_temperature_max_c=_number(data["apparent_temperature_max"][i], optional=True),
-            precipitation_probability_max_percent=_number(data["precipitation_probability_max"][i], optional=True, minimum=0, maximum=100),
-            precipitation_sum_mm=_number(data["precipitation_sum"][i], optional=True, minimum=0),
-            snowfall_sum_cm=_number(data["snowfall_sum"][i], optional=True, minimum=0),
-            wind_speed_max_m_s=_number(data["wind_speed_10m_max"][i], optional=True, minimum=0),
-            uv_index_max=_number(data["uv_index_max"][i], optional=True, minimum=0),
+            apparent_temperature_min_c=_optional_number(data["apparent_temperature_min"][i]),
+            apparent_temperature_max_c=_optional_number(data["apparent_temperature_max"][i]),
+            precipitation_probability_max_percent=_optional_number(data["precipitation_probability_max"][i], minimum=0, maximum=100),
+            precipitation_sum_mm=_optional_number(data["precipitation_sum"][i], minimum=0),
+            snowfall_sum_cm=_optional_number(data["snowfall_sum"][i], minimum=0),
+            wind_speed_max_m_s=_optional_number(data["wind_speed_10m_max"][i], minimum=0),
+            uv_index_max=_optional_number(data["uv_index_max"][i], minimum=0),
             weather_code=_integer(data["weather_code"][i]),
         )
 
+    # 시간별 데이터를 날씨 객체로 변환
     @staticmethod
     def _parse_hour(data: dict, i: int) -> HourlyForecast:
         return HourlyForecast(
             time=_time(data["time"][i]), temperature_c=_number(data["temperature_2m"][i]),
-            apparent_temperature_c=_number(data["apparent_temperature"][i], optional=True),
-            precipitation_probability_percent=_number(data["precipitation_probability"][i], optional=True, minimum=0, maximum=100),
-            wind_speed_m_s=_number(data["wind_speed_10m"][i], optional=True, minimum=0),
+            apparent_temperature_c=_optional_number(data["apparent_temperature"][i]),
+            precipitation_probability_percent=_optional_number(data["precipitation_probability"][i], minimum=0, maximum=100),
+            wind_speed_m_s=_optional_number(data["wind_speed_10m"][i], minimum=0),
             weather_code=_integer(data["weather_code"][i]),
         )

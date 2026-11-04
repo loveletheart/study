@@ -7,6 +7,7 @@ from app.weather.infrastructure.http_client import JsonHttpClient
 from app.weather.infrastructure.open_meteo import OpenMeteoProvider
 
 
+# 날씨 API 클라이언트와 캐시 구성
 @lru_cache
 def get_weather_provider() -> OpenMeteoProvider:
     settings = get_settings()
@@ -16,5 +17,6 @@ def get_weather_provider() -> OpenMeteoProvider:
     )
 
 
+# 날씨 제공사와 서비스 연결
 def get_weather_service() -> WeatherService:
     return WeatherService(get_weather_provider())

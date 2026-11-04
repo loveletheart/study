@@ -6,6 +6,7 @@ from pathlib import Path
 from app.common.config import get_settings
 
 
+# SQLite 연결 생성
 def connect_database(database_path: Path | None = None) -> sqlite3.Connection:
     path = database_path if database_path is not None else get_settings().database_path
     connection = sqlite3.connect(str(path), timeout=10)
@@ -14,6 +15,7 @@ def connect_database(database_path: Path | None = None) -> sqlite3.Connection:
     return connection
 
 
+# 테이블이 없으면 생성
 def initialize_database(database_path: Path | None = None) -> None:
     # 업무별 테이블 정의는 해당 업무의 infrastructure에서 관리한다.
     from app.users.infrastructure.models import CREATE_USERS_TABLE

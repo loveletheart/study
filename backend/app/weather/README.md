@@ -43,6 +43,8 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/weather/weekly?latitude=37.5665&
 
 ## 응답에서 확인할 정보
 
+모든 응답은 `code`, `message`, `data`, `details` 형식입니다. 성공 시 `code`는 `SUCCESS`이고 아래 날씨 필드는 `data` 안에 있습니다. 예: `data.current.temperature_c`, `data.daily`, `data.locations`. 실패 시 `data`는 `null`입니다.
+
 | 필드 | 의미 |
 | --- | --- |
 | `coordinates` | 사용자가 요청한 좌표. 제공사의 실제 예보 격자 중심과 다를 수 있음 |
@@ -72,6 +74,19 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/weather/weekly?latitude=37.5665&
 | `502` | 제공사의 오류 응답, 잘못된 JSON, 누락된 필수 데이터, 잘못된 단위·날짜 |
 | `503` | 연결 실패, 제공사 장애, 요청 한도 초과 |
 | `504` | 제공사 응답 시간 초과 |
+
+## Swagger와 오류 코드
+
+`/docs`에서 API별 사용 방법과 요청·응답 필드 설명을 볼 수 있습니다. 오류도 공통 `code`, `message`, `data`, `details` 형식이며, 같은 HTTP 503도 `WEATHER_UNAVAILABLE`과 `WEATHER_RATE_LIMITED`로 구분합니다. 예시 선택 목록에서 각 오류를 확인할 수 있습니다.
+
+- `WEATHER_INVALID_QUERY`: 날씨 조회 조건 오류(422)
+- `WEATHER_INVALID_RESPONSE`: 제공사 응답 형식·단위·날짜 또는 데이터 오류(502)
+- `WEATHER_UNAVAILABLE`: 제공사 연결 실패·서버 오류(503)
+- `WEATHER_RATE_LIMITED`: 제공사 호출 한도 초과(503)
+- `WEATHER_TIMEOUT`: 제공사 응답 제한 시간 초과(504)
+- `COMMON_INVALID_REQUEST`: FastAPI 입력 검증 오류(422)
+
+코드 정의와 기본 메시지는 `common/errors/codes.py`가 관리하며 라우터에서 HTTP 오류로 개별 변환하지 않습니다. 자세한 규칙은 [공통 오류 문서](../common/errors/README.md)를 참고하세요.
 
 ## 검증과 공식 문서
 

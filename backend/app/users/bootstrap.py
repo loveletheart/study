@@ -5,6 +5,7 @@ from app.users.application.services import UserService
 from app.users.infrastructure.unit_of_work import SQLiteUserUnitOfWork
 
 
+# 저장소와 사용자 서비스 연결
 def get_user_service() -> UserService:
     unit_of_work = SQLiteUserUnitOfWork(get_settings().database_path)
     return UserService(unit_of_work)

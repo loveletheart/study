@@ -16,9 +16,11 @@ from app.weather.application.exceptions import (
 
 
 class JsonHttpClient:
+    # 외부 API 제한 시간 설정
     def __init__(self, timeout_seconds: float = 10) -> None:
         self._timeout_seconds = timeout_seconds
 
+    # JSON 조회 및 외부 통신 오류 처리
     def get(self, url: str, parameters: dict) -> dict:
         request = Request(
             f"{url}?{urlencode(parameters)}",
@@ -30,25 +32,25 @@ class JsonHttpClient:
         except HTTPError as exc:
             exc.close()
             if exc.code == 429:
-                raise WeatherRateLimitError("날씨 제공 서비스의 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.") from exc
+                raise WeatherRateLimitError() from exc
             if exc.code >= 500:
-                raise WeatherProviderUnavailableError("날씨 제공 서비스를 일시적으로 사용할 수 없습니다.") from exc
-            raise WeatherProviderDataError("날씨 제공 서비스가 요청을 처리하지 못했습니다.") from exc
+                raise WeatherProviderUnavailableError() from exc
+            raise WeatherProviderDataError() from exc
         except (TimeoutError, socket.timeout) as exc:
-            raise WeatherProviderTimeoutError("날씨 제공 서비스의 응답 시간이 초과되었습니다.") from exc
+            raise WeatherProviderTimeoutError() from exc
         except URLError as exc:
             if isinstance(exc.reason, (TimeoutError, socket.timeout)):
-                raise WeatherProviderTimeoutError("날씨 제공 서비스의 응답 시간이 초과되었습니다.") from exc
-            raise WeatherProviderUnavailableError("날씨 제공 서비스에 연결할 수 없습니다.") from exc
+                raise WeatherProviderTimeoutError() from exc
+            raise WeatherProviderUnavailableError() from exc
         except (OSError, HTTPException) as exc:
-            raise WeatherProviderUnavailableError("날씨 제공 서비스에 연결할 수 없습니다.") from exc
+            raise WeatherProviderUnavailableError() from exc
 
         if len(body) > 1_048_576:
-            raise WeatherProviderDataError("날씨 제공 서비스의 응답 크기가 너무 큽니다.")
+            raise WeatherProviderDataError()
         try:
             payload = json.loads(body)
         except (ValueError, UnicodeDecodeError) as exc:
-            raise WeatherProviderDataError("날씨 제공 서비스의 응답 형식이 올바르지 않습니다.") from exc
+            raise WeatherProviderDataError() from exc
         if not isinstance(payload, dict) or payload.get("error"):
-            raise WeatherProviderDataError("날씨 제공 서비스의 응답이 올바르지 않습니다.")
+            raise WeatherProviderDataError()
         return payload

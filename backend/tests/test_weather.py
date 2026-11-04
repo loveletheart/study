@@ -10,8 +10,9 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
-from fastapi import HTTPException
+from fastapi import Request
 
+from app.common.errors.handlers import handle_app_error
 from app.weather.application.exceptions import (
     InvalidWeatherQueryError, WeatherProviderDataError, WeatherProviderTimeoutError,
     WeatherProviderUnavailableError, WeatherRateLimitError,
@@ -71,7 +72,11 @@ class WeatherTests(unittest.TestCase):
         self.service = WeatherService(self.provider)
 
     def test_today_has_korean_summary_24_hours_and_explicit_units(self):
-        result = get_today(37.5665, 126.9780, self.service)
+        response = get_today(37.5665, 126.9780, self.service)
+        self.assertEqual(response.code, "SUCCESS")
+        self.assertEqual(response.details, [])
+        self.assertEqual(set(response.model_dump()), {"code", "message", "data", "details"})
+        result = response.data
         self.assertEqual(result.timezone, "Asia/Seoul")
         self.assertEqual(result.today.date.isoformat(), "2026-11-04")
         self.assertEqual(len(result.hourly), 24)
@@ -86,7 +91,11 @@ class WeatherTests(unittest.TestCase):
 
     def test_weekly_has_seven_consecutive_days_and_shares_today_cache(self):
         today = self.service.get_today(37.5665, 126.9780)
-        weekly = get_weekly(37.5665, 126.9780, self.service)
+        response = get_weekly(37.5665, 126.9780, self.service)
+        self.assertEqual(response.code, "SUCCESS")
+        self.assertEqual(set(response.model_dump()), {"code", "message", "data", "details"})
+        self.assertNotIn("hourly", response.model_dump()["data"])
+        weekly = response.data
         self.assertEqual(len(weekly.daily), 7)
         self.assertEqual(weekly.daily[0].date, today.today.date)
         self.assertEqual((weekly.daily[-1].date - weekly.daily[0].date).days, 6)
@@ -110,7 +119,7 @@ class WeatherTests(unittest.TestCase):
     def test_null_optional_values_remain_unknown_instead_of_zero(self):
         self.payload["daily"]["precipitation_probability_max"] = [None] * 7
         self.payload["current"]["apparent_temperature"] = None
-        result = get_today(37, 127, self.service)
+        result = get_today(37, 127, self.service).data
         self.assertIsNone(result.current.apparent_temperature_c)
         self.assertIsNone(result.today.precipitation_probability_max_percent)
         self.assertNotIn("강수확률", result.summary)
@@ -157,7 +166,9 @@ class WeatherTests(unittest.TestCase):
             "id": 1835848, "name": "서울", "latitude": 37.5665, "longitude": 126.978,
             "country_code": "KR", "country": "대한민국", "timezone": "Asia/Seoul",
         }]}
-        result = search_locations(" 서울 ", self.service, 5)
+        response = search_locations(" 서울 ", self.service, 5)
+        self.assertEqual(set(response.model_dump()), {"code", "message", "data", "details"})
+        result = response.data
         self.assertEqual(result.locations[0].name, "서울")
         self.assertIsNone(result.locations[0].admin2)
         params = self.http.get.call_args.args[1]
@@ -188,9 +199,11 @@ class WeatherTests(unittest.TestCase):
         ]:
             with self.subTest(error=error):
                 self.http.get.side_effect = error
-                with self.assertRaises(HTTPException) as caught:
+                with self.assertRaises(type(error)) as caught:
                     get_today(37, 127, self.service)
-                self.assertEqual(caught.exception.status_code, expected)
+                response = handle_app_error(Request({"type": "http"}), caught.exception)
+                self.assertEqual(response.status_code, expected)
+                self.assertEqual(json.loads(response.body)["code"], error.error_code.value)
 
     def test_error_is_not_cached_and_next_request_can_recover(self):
         self.http.get.side_effect = [WeatherProviderTimeoutError("timeout"), forecast_payload()]

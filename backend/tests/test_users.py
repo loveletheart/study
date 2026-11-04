@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from uuid import uuid4
 
+from fastapi import Response
+
 from app.common.database import initialize_database
 from app.users.application.dto import CreateUserCommand
 from app.users.application.exceptions import UserNotFoundError
@@ -12,6 +14,8 @@ from app.users.application.services import UserService
 from app.users.domain.entities import User
 from app.users.domain.exceptions import DuplicateEmailError, InvalidUserError
 from app.users.infrastructure.unit_of_work import SQLiteUserUnitOfWork
+from app.users.presentation.router import create_user, get_user
+from app.users.presentation.schemas import CreateUserRequest
 
 
 class UserIntegrationTests(unittest.TestCase):
@@ -32,6 +36,18 @@ class UserIntegrationTests(unittest.TestCase):
         self.assertEqual(stored, result)
         self.assertEqual(stored.name, "민성")
         self.assertEqual(stored.email, "minseong@example.com")
+
+    def test_user_routes_wrap_data_and_keep_the_location_header(self) -> None:
+        response = Response()
+        created = create_user(
+            CreateUserRequest(name="민성", email="Minseong@Example.com"), self.make_service(), response,
+        )
+        fetched = get_user(created.data.id, self.make_service())
+        self.assertEqual(response.headers["Location"], f"/api/v1/users/{created.data.id}")
+        self.assertEqual(created, fetched)
+        self.assertEqual(created.code, "SUCCESS")
+        self.assertEqual(created.data.email, "minseong@example.com")
+        self.assertEqual(set(created.model_dump()), {"code", "message", "data", "details"})
 
     def test_duplicate_email_does_not_replace_original_user(self) -> None:
         service = self.make_service()

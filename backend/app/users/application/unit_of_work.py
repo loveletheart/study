@@ -9,16 +9,22 @@ from app.users.domain.repositories import UserRepository
 class UserUnitOfWork(ABC):
     users: UserRepository
 
+    # 작업 범위 시작 계약
     @abstractmethod
-    def __enter__(self) -> "UserUnitOfWork": ...
+    def __enter__(self) -> "UserUnitOfWork":
+        ...
 
+    # 작업 종료와 자원 정리 계약
     @abstractmethod
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
         traceback: TracebackType | None,
-    ) -> None: ...
+    ) -> None:
+        ...
 
+    # 변경 사항 확정 계약
     @abstractmethod
-    def commit(self) -> None: ...
+    def commit(self) -> None:
+        ...

@@ -45,6 +45,34 @@ Python 코드는 `backend/`에 있고, `.venv`, `.env`, 실행 스크립트와 �
 
 응답 필드·오류 코드·캐시 동작은 [날씨 기능 문서](backend/app/weather/README.md)에 정리했습니다.
 
+## API 설명과 공통 오류
+
+Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를 펼치면 한국어 기능 설명, 입력 조건, 응답 필드와 오류 코드별 예시를 확인할 수 있습니다. 내부 메서드는 바로 위의 짧은 주석으로 역할을 표시합니다.
+
+모든 API는 `code`, `message`, `data`, `details` 형식을 사용합니다. 성공 결과는 기존 최상위 필드에서 `data` 안으로 이동했습니다. HTTP 상태 코드와 API 경로는 동일합니다.
+
+```json
+{
+  "code": "SUCCESS",
+  "message": "요청이 성공했습니다.",
+  "data": {"status": "ok"},
+  "details": []
+}
+```
+
+실패 시 `data`는 `null`이며, 입력 검증 오류는 `details`에 담습니다.
+
+```json
+{
+  "code": "WEATHER_TIMEOUT",
+  "message": "날씨 제공 서비스의 응답 시간이 초과되었습니다.",
+  "data": null,
+  "details": []
+}
+```
+
+오류 코드·기본 HTTP 상태·기본 메시지는 `backend/app/common/errors/codes.py`에서 관리합니다. 새 오류를 추가하는 방법과 검증 오류 응답은 [공통 오류 문서](backend/app/common/errors/README.md)를 참고하세요.
+
 ## 설정과 DB
 
 `.env`가 없어도 기본값으로 실행됩니다. 설정을 변경하려면 `.env.example`을 `.env`로 복사합니다.
@@ -69,6 +97,8 @@ Python 코드는 `backend/`에 있고, `.venv`, `.env`, 실행 스크립트와 �
 | `.vscode/tasks.json` / `.vscode/launch.json` | 환경 준비를 먼저 수행하는 실행·디버깅 설정 |
 | `backend/app/common/config.py` | 환경변수와 `.env` 설정 읽기 |
 | `backend/app/common/database.py` | DB 연결과 개발용 테이블 초기화 |
+| `backend/app/common/responses.py` | 모든 API의 공통 응답 형식 |
+| `backend/app/common/errors/` | 공통 오류 코드·응답 모델·예외 핸들러·Swagger 오류 문서 |
 | `backend/app/users/presentation/router.py` | HTTP 요청, Service 호출, 상태 코드·응답 반환 |
 | `backend/app/users/presentation/schemas.py` | Pydantic 요청·응답 형식 |
 | `backend/app/users/application/services.py` | 사용자 등록·조회 절차와 트랜잭션 범위 |
@@ -110,9 +140,9 @@ Swagger에서 `POST /api/v1/users`를 실행합니다.
 | --- | --- | --- |
 | `POST /api/v1/users` | `201`, 생성된 UUID·이름·이메일 | 이메일 중복 `409`, 잘못된 입력 `422` |
 | `GET /api/v1/users/{user_id}` | `200`, 사용자 정보 | 없는 사용자 `404`, 잘못된 UUID `422` |
-| `GET /health` | `200`, `{"status": "ok"}` | 앱 응답 여부 확인용 |
+| `GET /health` | `200`, `data.status`가 `ok` | 앱 응답 여부 확인용 |
 
-생성 결과의 `id`를 조회 API에 입력합니다. 이름의 앞뒤 공백을 제거하고 이메일 전체를 소문자로 정규화합니다. 이메일은 기본 형식만 검증하며 실제 수신·소유 여부는 확인하지 않습니다. 사전 중복 조회와 DB UNIQUE 제약으로 중복 이메일을 방지합니다.
+생성 결과의 `data.id`를 조회 API에 입력합니다. 이름의 앞뒤 공백을 제거하고 이메일 전체를 소문자로 정규화합니다. 이메일은 기본 형식만 검증하며 실제 수신·소유 여부는 확인하지 않습니다. 사전 중복 조회와 DB UNIQUE 제약으로 중복 이메일을 방지합니다.
 
 ## 검증
 
