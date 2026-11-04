@@ -1,6 +1,6 @@
 # FastAPI와 DDD 학습 프로젝트
 
-업무별로 폴더를 나누고, 각 업무 내부를 presentation / application / domain / infrastructure 계층으로 구성합니다. 현재는 날씨 조회 기능과 사용자 등록·단건 조회 예시를 구현했습니다. 비밀번호·로그인·인증은 포함하지 않습니다.
+업무별로 폴더를 나누고, 각 업무 내부를 presentation / application / domain / infrastructure 계층으로 구성합니다. 현재는 날씨 조회, 날씨 기반 옷차림 추천과 사용자 등록·단건 조회 예시를 구현했습니다. 비밀번호·로그인·인증은 포함하지 않습니다.
 
 ## 실행
 
@@ -44,6 +44,15 @@ Python 코드는 `backend/`에 있고, `.venv`, `.env`, 실행 스크립트와 �
 지역 검색에서 선택한 위도·경도를 날씨 API에 전달합니다. 모든 예보 날짜는 한국 시간 기준입니다. 실제 날씨는 Open-Meteo 공개 API에서 가져오며 서버 시작이나 조회 실패 시 임의의 샘플 날씨를 반환하지 않습니다.
 
 응답 필드·오류 코드·캐시 동작은 [날씨 기능 문서](backend/app/weather/README.md)에 정리했습니다.
+
+## 옷차림 추천 API
+
+| API | 역할 |
+| --- | --- |
+| `GET /api/v1/outfits/today?latitude=37.5665&longitude=126.978` | 오늘의 베스트·워스트 옷차림과 추천 이유 |
+| `GET /api/v1/outfits/weekly?latitude=37.5665&longitude=126.978` | 오늘부터 7일 옷차림과 중복 없는 주간 준비 의류 |
+
+기존 날씨 조회와 캐시를 재사용합니다. 체감온도·기온·강수·바람·일교차를 기준으로 의류와 준비물을 구성하며, 판단 기준과 정보 누락 여부를 함께 반환합니다. 이미지와 인기 순위 연동은 후속 작업입니다. 계층·필드·초기 규칙은 [옷차림 기능 문서](backend/app/outfits/README.md)를 참고하세요.
 
 ## API 설명과 공통 오류
 
@@ -99,6 +108,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `backend/app/common/database.py` | DB 연결과 개발용 테이블 초기화 |
 | `backend/app/common/responses.py` | 모든 API의 공통 응답 형식 |
 | `backend/app/common/errors/` | 공통 오류 코드·응답 모델·예외 핸들러·Swagger 오류 문서 |
+| `backend/app/outfits/` | 날씨 기반 옷차림 규칙·오늘/주간 조회·응답 처리 |
 | `backend/app/users/presentation/router.py` | HTTP 요청, Service 호출, 상태 코드·응답 반환 |
 | `backend/app/users/presentation/schemas.py` | Pydantic 요청·응답 형식 |
 | `backend/app/users/application/services.py` | 사용자 등록·조회 절차와 트랜잭션 범위 |
@@ -154,4 +164,4 @@ Swagger에서 `POST /api/v1/users`를 실행합니다.
 
 ## 다음 업무 추가
 
-옷차림 추천 기능을 추가한다면 `backend/app/outfits/` 아래 같은 4개 계층과 `bootstrap.py`를 배치하고 `backend/main.py`에서 라우터를 등록합니다. 공통 폴더에는 환경 설정·DB 연결처럼 여러 업무가 사용하는 기술 기반만 둡니다.
+새 업무는 `backend/app/` 아래 4개 계층과 `bootstrap.py`를 배치하고 `backend/main.py`에서 라우터를 등록합니다. 옷차림 추천의 외부 날씨 연결처럼 다른 업무의 구현을 사용하는 부분은 infrastructure에 둡니다. 공통 폴더에는 여러 업무가 사용하는 환경 설정·DB 연결·응답 형식을 둡니다.

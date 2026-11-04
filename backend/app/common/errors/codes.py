@@ -22,6 +22,7 @@ class ErrorCode(str, Enum):
     WEATHER_TIMEOUT = "WEATHER_TIMEOUT"
     WEATHER_INVALID_RESPONSE = "WEATHER_INVALID_RESPONSE"
     WEATHER_RATE_LIMITED = "WEATHER_RATE_LIMITED"
+    OUTFIT_INVALID_FORECAST = "OUTFIT_INVALID_FORECAST"
 
 
 @dataclass(frozen=True)
@@ -49,4 +50,5 @@ ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
     ErrorCode.WEATHER_TIMEOUT: ErrorSpec(504, "날씨 제공 서비스의 응답 시간이 초과되었습니다."),
     ErrorCode.WEATHER_INVALID_RESPONSE: ErrorSpec(502, "날씨 제공 서비스의 응답 형식 또는 데이터가 올바르지 않습니다."),
     ErrorCode.WEATHER_RATE_LIMITED: ErrorSpec(503, "날씨 제공 서비스의 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요."),
+    ErrorCode.OUTFIT_INVALID_FORECAST: ErrorSpec(502, "옷차림 추천에 필요한 날씨 정보가 올바르지 않습니다."),
 })
