@@ -23,7 +23,6 @@ Latitude = Annotated[float, Query(ge=-90, le=90, allow_inf_nan=False, descriptio
 Longitude = Annotated[float, Query(ge=-180, le=180, allow_inf_nan=False, description="지역 검색 결과의 경도. 서울 예시: 126.978", examples=[126.978])]
 
 
-"""국내 지역명으로 위치 후보 검색"""
 @router.get(
     "/locations", response_model=ApiResponse[LocationsResponse],
     summary="국내 지역 검색", operation_id="search_weather_locations",
@@ -35,11 +34,11 @@ def search_locations(
     service: WeatherServiceDependency,
     limit: Annotated[int, Query(ge=1, le=10, description="검색 결과 최대 개수(1~10)")] = 5,
 ) -> ApiResponse[LocationsResponse]:
+    """국내 지역명으로 위치 후보 검색"""
     result = service.search_locations(query, limit)
     return ApiResponse(data=LocationsResponse.model_validate(result))
 
 
-"""현재 날씨와 오늘 예보 조회"""
 @router.get(
     "/today", response_model=ApiResponse[TodayWeatherResponse],
     summary="오늘 날씨 조회", operation_id="get_today_weather",
@@ -47,11 +46,11 @@ def search_locations(
     response_description="모델 기반 현재 날씨, 오늘 일별·24시간 예보와 한글 요약",
 )
 def get_today(latitude: Latitude, longitude: Longitude, service: WeatherServiceDependency) -> ApiResponse[TodayWeatherResponse]:
+    """현재 날씨와 오늘 예보 조회"""
     result = service.get_today(latitude, longitude)
     return ApiResponse(data=TodayWeatherResponse.from_result(result))
 
 
-"""오늘부터 7일 예보 조회"""
 @router.get(
     "/weekly", response_model=ApiResponse[WeeklyWeatherResponse],
     summary="오늘부터 7일 예보 조회", operation_id="get_weekly_weather",
@@ -59,5 +58,6 @@ def get_today(latitude: Latitude, longitude: Longitude, service: WeatherServiceD
     response_description="한국 시간 기준 오늘부터 연속된 7일의 일별 날씨",
 )
 def get_weekly(latitude: Latitude, longitude: Longitude, service: WeatherServiceDependency) -> ApiResponse[WeeklyWeatherResponse]:
+    """오늘부터 7일 예보 조회"""
     result = service.get_weekly(latitude, longitude)
     return ApiResponse(data=WeeklyWeatherResponse.model_validate(result))

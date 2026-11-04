@@ -16,12 +16,12 @@ from app.weather.application.exceptions import (
 
 
 class JsonHttpClient:
-    # 외부 API 제한 시간 설정
     def __init__(self, timeout_seconds: float = 10) -> None:
+        """외부 API 제한 시간 설정"""
         self._timeout_seconds = timeout_seconds
 
-    # JSON 조회 및 외부 통신 오류 처리
     def get(self, url: str, parameters: dict) -> dict:
+        """JSON 조회 및 외부 통신 오류 처리"""
         request = Request(
             f"{url}?{urlencode(parameters)}",
             headers={"Accept": "application/json", "User-Agent": "StudyWeather/1.0"},

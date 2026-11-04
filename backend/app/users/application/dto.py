@@ -18,7 +18,7 @@ class UserDTO:
     name: str
     email: str
 
-    # 사용자 객체를 응답 DTO로 변환
     @classmethod
     def from_entity(cls, user: User) -> "UserDTO":
+        """사용자 객체를 응답 DTO로 변환"""
         return cls(id=user.id, name=user.name, email=user.email)

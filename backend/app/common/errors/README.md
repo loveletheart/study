@@ -66,4 +66,4 @@ responses = error_responses(ErrorCode.WEATHER_TIMEOUT)
 
 - Swagger에는 짧은 API 설명, 요청·응답 필드와 오류 예시가 표시됩니다.
 - 같은 HTTP 상태에 여러 업무 오류가 있으면 Example Value의 예시 선택 목록으로 구분합니다. 예: 503의 WEATHER_UNAVAILABLE / WEATHER_RATE_LIMITED.
-- 내부 메서드의 역할은 메서드 바로 위 한 줄 주석으로 확인합니다.
+- 내부 메서드의 역할은 함수 본문 첫 줄의 한 줄 docstring으로 확인합니다.

@@ -8,7 +8,7 @@ class AppError(Exception):
 
     error_code = ErrorCode.COMMON_INTERNAL_ERROR
 
-    # 오류 코드의 기본 메시지로 예외 생성
     def __init__(self, message: str | None = None) -> None:
+        """오류 코드의 기본 메시지로 예외 생성"""
         self.message = message if message is not None else ERROR_SPECS[self.error_code].message
         super().__init__(self.message)

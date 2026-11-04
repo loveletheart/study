@@ -6,10 +6,10 @@ from app.weather.domain.models import Coordinates, Location, WeatherForecast
 
 
 class WeatherProvider(Protocol):
-    # 지역 검색 인터페이스
     def search_locations(self, query: str, limit: int) -> tuple[Location, ...]:
+        """지역 검색 인터페이스"""
         ...
 
-    # 날씨 예보 조회 인터페이스
     def get_forecast(self, coordinates: Coordinates) -> WeatherForecast:
+        """날씨 예보 조회 인터페이스"""
         ...

@@ -10,16 +10,16 @@ T = TypeVar("T")
 
 
 class TTLCache:
-    # 캐시 유지 시간과 용량 설정
     def __init__(self, ttl_seconds: float, max_entries: int = 128, timer: Callable[[], float] = monotonic):
+        """캐시 유지 시간과 용량 설정"""
         self._ttl_seconds = ttl_seconds
         self._max_entries = max_entries
         self._timer = timer
         self._entries: OrderedDict[tuple, tuple[float, object]] = OrderedDict()
         self._lock = RLock()
 
-    # 캐시 조회 또는 새 데이터 로드
     def get_or_load(self, key: tuple, load: Callable[[], T]) -> T:
+        """캐시 조회 또는 새 데이터 로드"""
         if self._ttl_seconds <= 0:
             return load()
         with self._lock:

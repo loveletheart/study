@@ -30,9 +30,9 @@ from app.users.presentation.router import router as users_router
 from app.weather.presentation.router import router as weather_router
 
 
-# 서버 시작 시 DB 테이블 준비
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """서버 시작 시 DB 테이블 준비"""
     initialize_database()
     yield
 
@@ -58,13 +58,13 @@ app.include_router(users_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
 
 
-# 서비스 안내 메시지 반환
 @app.get("/", summary="서비스 기본 안내", description="서비스 안내 메시지를 반환합니다.", tags=["system"], responses=error_responses(include_validation=False))
 async def root() -> ApiResponse[dict[str, str]]:
+    """서비스 안내 메시지 반환"""
     return ApiResponse(data={"message": "Hello FastAPI"})
 
 
-# 서버 응답 상태 확인
 @app.get("/health", summary="서버 응답 상태 확인", description="앱의 응답 여부만 확인합니다. DB·외부 API는 검사하지 않습니다.", tags=["system"], responses=error_responses(include_validation=False))
 async def health() -> ApiResponse[dict[str, str]]:
+    """서버 응답 상태 확인"""
     return ApiResponse(data={"status": "ok"})

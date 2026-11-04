@@ -7,14 +7,14 @@ from app.users.domain.entities import User
 
 
 class UserRepository(Protocol):
-    # UUID로 사용자 조회 계약
     def find_by_id(self, user_id: UUID) -> User | None:
+        """UUID로 사용자 조회 계약"""
         ...
 
-    # 이메일로 사용자 조회 계약
     def find_by_email(self, email: str) -> User | None:
+        """이메일로 사용자 조회 계약"""
         ...
 
-    # 사용자 저장 계약
     def add(self, user: User) -> None:
+        """사용자 저장 계약"""
         ...

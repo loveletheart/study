@@ -4,8 +4,8 @@ from app.common.errors.codes import ERROR_SPECS, ErrorCode
 from app.common.errors.schemas import ErrorResponse
 
 
-# Swagger 오류 응답과 예시 생성
 def error_responses(*codes: ErrorCode, include_validation: bool = True) -> dict:
+    """Swagger 오류 응답과 예시 생성"""
     selected = [*codes, ErrorCode.COMMON_INTERNAL_ERROR]
     if include_validation:
         selected.append(ErrorCode.COMMON_INVALID_REQUEST)
@@ -25,8 +25,8 @@ def error_responses(*codes: ErrorCode, include_validation: bool = True) -> dict:
     return responses
 
 
-# Swagger 오류 코드 표 생성
 def error_code_table() -> str:
+    """Swagger 오류 코드 표 생성"""
     rows = ["| 코드 | 기본 HTTP 상태 | 설명 |", "| --- | --- | --- |"]
     rows.extend(f"| `{code.value}` | {spec.status_code} | {spec.message} |" for code, spec in ERROR_SPECS.items())
     return "\n".join(rows)

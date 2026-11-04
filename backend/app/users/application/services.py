@@ -10,12 +10,12 @@ from app.users.domain.exceptions import DuplicateEmailError
 
 
 class UserService:
-    # 사용자 작업 단위 주입
     def __init__(self, unit_of_work: UserUnitOfWork) -> None:
+        """사용자 작업 단위 주입"""
         self._unit_of_work = unit_of_work
 
-    # 중복 확인 후 사용자 저장
     def create_user(self, command: CreateUserCommand) -> UserDTO:
+        """중복 확인 후 사용자 저장"""
         user = User(name=command.name, email=command.email)
         with self._unit_of_work as uow:
             if uow.users.find_by_email(user.email) is not None:
@@ -24,8 +24,8 @@ class UserService:
             uow.commit()
         return UserDTO.from_entity(user)
 
-    # UUID로 사용자 조회
     def get_user(self, user_id: UUID) -> UserDTO:
+        """UUID로 사용자 조회"""
         with self._unit_of_work as uow:
             user = uow.users.find_by_id(user_id)
             if user is None:

@@ -108,9 +108,9 @@ class TodayWeatherResponse(ForecastMetadata):
     hourly: list[HourlyForecastResponse] = Field(description="한국 시간 오늘 00시부터 23시까지의 예보")
     summary: str = Field(description="오늘 날씨의 한글 요약. 옷차림 추천은 포함하지 않습니다.")
 
-    # 오늘 조회 결과를 응답으로 변환
     @classmethod
     def from_result(cls, result: TodayWeatherResult) -> "TodayWeatherResponse":
+        """오늘 조회 결과를 응답으로 변환"""
         forecast = result.forecast
         return cls.model_validate({
             "coordinates": forecast.coordinates,

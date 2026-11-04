@@ -9,28 +9,28 @@ from app.users.infrastructure.repositories import SQLiteUserRepository
 
 
 class SQLiteUserUnitOfWork(UserUnitOfWork):
-    # DB 경로 보관
     def __init__(self, database_path: Path) -> None:
+        """DB 경로 보관"""
         self._database_path = database_path
 
-    # DB 연결과 저장소 준비
     def __enter__(self) -> "SQLiteUserUnitOfWork":
+        """DB 연결과 저장소 준비"""
         self._connection = connect_database(self._database_path)
         self.users = SQLiteUserRepository(self._connection)
         return self
 
-    # 미커밋 변경 롤백 후 연결 종료
     def __exit__(
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        """미커밋 변경 롤백 후 연결 종료"""
         try:
             self._connection.rollback()
         finally:
             self._connection.close()
 
-    # 변경 사항 커밋
     def commit(self) -> None:
+        """변경 사항 커밋"""
         self._connection.commit()

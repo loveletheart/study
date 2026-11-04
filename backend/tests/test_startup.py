@@ -15,6 +15,7 @@ from unittest.mock import patch
 @unittest.skipUnless(sys.platform == "win32", "Windows startup scripts")
 class StartupTests(unittest.TestCase):
     def test_fresh_checkout_reuse_repair_and_dependency_failure(self) -> None:
+        """가상환경 생성·재사용·복구와 설치 실패 시 중단을 확인한다."""
         project_root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory(prefix="study startup ") as directory:
             checkout = Path(directory)
@@ -26,6 +27,7 @@ class StartupTests(unittest.TestCase):
             env = {**os.environ, "PIP_NO_INDEX": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
 
             def setup(python_override: bool = True) -> subprocess.CompletedProcess:
+                """임시 프로젝트의 환경 준비 스크립트를 실행한다."""
                 command = [
                     "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
                     "-File", str(checkout / "run.ps1"), "-SetupOnly",
@@ -77,6 +79,7 @@ class StartupTests(unittest.TestCase):
             self.assertNotIn(b"[server]", failed.stdout)
 
     def test_main_delegates_before_importing_application_dependencies(self) -> None:
+        """의존성 로드 전에 실행 스크립트로 위임하는지 확인한다."""
         main_path = Path(__file__).resolve().parents[1] / "main.py"
         with patch("subprocess.call", return_value=0) as launch:
             with self.assertRaises(SystemExit) as stopped:

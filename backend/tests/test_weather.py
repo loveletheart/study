@@ -64,6 +64,7 @@ def forecast_payload(now: datetime = NOW) -> dict:
 
 class WeatherTests(unittest.TestCase):
     def setUp(self) -> None:
+        """합성 날씨 데이터와 테스트용 제공사를 준비한다."""
         self.payload = forecast_payload()
         self.http = Mock()
         self.http.get.side_effect = lambda *args: copy.deepcopy(self.payload)
@@ -72,6 +73,7 @@ class WeatherTests(unittest.TestCase):
         self.service = WeatherService(self.provider)
 
     def test_today_has_korean_summary_24_hours_and_explicit_units(self):
+        """오늘 예보의 한글 요약·24시간 정보·단위를 확인한다."""
         response = get_today(37.5665, 126.9780, self.service)
         self.assertEqual(response.code, "SUCCESS")
         self.assertEqual(response.details, [])
@@ -90,6 +92,7 @@ class WeatherTests(unittest.TestCase):
         self.assertEqual(encoded["provider"], "Open-Meteo")
 
     def test_weekly_has_seven_consecutive_days_and_shares_today_cache(self):
+        """연속된 7일 예보와 오늘 조회의 캐시 공유를 확인한다."""
         today = self.service.get_today(37.5665, 126.9780)
         response = get_weekly(37.5665, 126.9780, self.service)
         self.assertEqual(response.code, "SUCCESS")
@@ -105,11 +108,13 @@ class WeatherTests(unittest.TestCase):
         self.assertEqual(parameters["wind_speed_unit"], "ms")
 
     def test_coordinate_queries_keep_locations_separate(self):
+        """서로 다른 좌표의 예보를 분리해서 조회한다."""
         self.service.get_weekly(37.5, 127)
         self.service.get_weekly(35.1, 129)
         self.assertEqual(self.http.get.call_count, 2)
 
     def test_invalid_coordinates_reject_nan_infinity_and_out_of_range(self):
+        """범위 밖 좌표와 NaN·무한대 입력을 거부한다."""
         for latitude, longitude in [(91, 127), (37, 181), (float("nan"), 127), (37, float("inf"))]:
             with self.subTest(latitude=latitude, longitude=longitude):
                 with self.assertRaises(InvalidWeatherQueryError):
@@ -117,6 +122,7 @@ class WeatherTests(unittest.TestCase):
         self.http.get.assert_not_called()
 
     def test_null_optional_values_remain_unknown_instead_of_zero(self):
+        """선택 항목의 null을 0으로 바꾸지 않는지 확인한다."""
         self.payload["daily"]["precipitation_probability_max"] = [None] * 7
         self.payload["current"]["apparent_temperature"] = None
         result = get_today(37, 127, self.service).data
@@ -125,11 +131,13 @@ class WeatherTests(unittest.TestCase):
         self.assertNotIn("강수확률", result.summary)
 
     def test_unknown_weather_code_is_not_reported_as_clear(self):
+        """알 수 없는 날씨 코드를 맑음으로 처리하지 않는다."""
         self.payload["daily"]["weather_code"] = [999] * 7
         result = self.service.get_today(37, 127)
         self.assertEqual(result.today.description, "알 수 없는 날씨")
 
     def test_malformed_or_incomplete_forecasts_are_rejected(self):
+        """단위·날짜·필수 값이 잘못된 예보를 거부한다."""
         mutations = [
             lambda p: p.update(timezone="UTC"),
             lambda p: p["daily_units"].update(wind_speed_10m_max="km/h"),
@@ -152,6 +160,7 @@ class WeatherTests(unittest.TestCase):
                     provider.get_forecast(Coordinates(37, 127))
 
     def test_cache_is_not_reused_across_korean_midnight(self):
+        """한국 시간 자정이 지나면 예보를 다시 조회한다."""
         self.now = NOW.replace(hour=14, minute=59)
         self.payload = forecast_payload(self.now)
         first = self.service.get_today(37, 127)
@@ -162,6 +171,7 @@ class WeatherTests(unittest.TestCase):
         self.assertEqual(self.http.get.call_count, 2)
 
     def test_search_locations_uses_korean_country_filter_and_trims_query(self):
+        """국내 지역 필터와 검색어 공백 제거를 확인한다."""
         self.payload = {"results": [{
             "id": 1835848, "name": "서울", "latitude": 37.5665, "longitude": 126.978,
             "country_code": "KR", "country": "대한민국", "timezone": "Asia/Seoul",
@@ -176,21 +186,25 @@ class WeatherTests(unittest.TestCase):
         self.assertEqual(params["countryCode"], "KR")
 
     def test_empty_location_search_is_a_successful_empty_list(self):
+        """검색 결과가 없으면 빈 목록으로 반환한다."""
         self.payload = {"generationtime_ms": 0.1}
         self.assertEqual(self.service.search_locations("없는지역").locations, ())
 
     def test_blank_or_short_location_search_does_not_call_provider(self):
+        """잘못된 검색어는 외부 조회 전에 거부한다."""
         for query in (" ", "서", "x" * 101):
             with self.assertRaises(InvalidWeatherQueryError):
                 self.service.search_locations(query)
         self.http.get.assert_not_called()
 
     def test_invalid_geocoding_payload_is_rejected(self):
+        """잘못된 지역 검색 응답을 거부한다."""
         self.payload = {"results": None}
         with self.assertRaises(WeatherProviderDataError):
             self.service.search_locations("서울")
 
     def test_provider_failures_map_to_public_http_status_codes(self):
+        """제공사 오류의 공개 HTTP 상태와 코드를 확인한다."""
         for error, expected in [
             (WeatherProviderTimeoutError("timeout"), 504),
             (WeatherProviderUnavailableError("unavailable"), 503),
@@ -206,6 +220,7 @@ class WeatherTests(unittest.TestCase):
                 self.assertEqual(json.loads(response.body)["code"], error.error_code.value)
 
     def test_error_is_not_cached_and_next_request_can_recover(self):
+        """실패 응답을 캐시하지 않고 재조회하는지 확인한다."""
         self.http.get.side_effect = [WeatherProviderTimeoutError("timeout"), forecast_payload()]
         with self.assertRaises(WeatherProviderTimeoutError):
             self.service.get_weekly(37, 127)
@@ -214,6 +229,7 @@ class WeatherTests(unittest.TestCase):
 
 class CacheTests(unittest.TestCase):
     def test_ttl_expiry_and_capacity(self):
+        """캐시 만료와 최대 보관 개수를 확인한다."""
         now = [0.0]
         cache = TTLCache(10, max_entries=2, timer=lambda: now[0])
         load = Mock(side_effect=range(10))
@@ -229,6 +245,7 @@ class CacheTests(unittest.TestCase):
 class HttpClientTests(unittest.TestCase):
     @patch("app.weather.infrastructure.http_client.urlopen")
     def test_utf8_parameters_response_and_timeout(self, urlopen):
+        """UTF-8 요청·JSON 응답·타임아웃 전달을 확인한다."""
         response = Mock()
         response.__enter__ = Mock(return_value=response)
         response.__exit__ = Mock(return_value=False)
@@ -242,6 +259,7 @@ class HttpClientTests(unittest.TestCase):
 
     @patch("app.weather.infrastructure.http_client.urlopen")
     def test_network_and_http_errors_are_classified(self, urlopen):
+        """통신·HTTP 오류가 적절한 업무 오류로 변환되는지 확인한다."""
         for error, expected in [
             (TimeoutError(), WeatherProviderTimeoutError),
             (URLError(TimeoutError()), WeatherProviderTimeoutError),
@@ -258,6 +276,7 @@ class HttpClientTests(unittest.TestCase):
 
     @patch("app.weather.infrastructure.http_client.urlopen")
     def test_invalid_json_error_objects_and_oversized_responses(self, urlopen):
+        """잘못된 JSON·오류 응답·크기 초과 응답을 거부한다."""
         for body in (b"not-json", b"[]", b'{"error": true}', b"x" * 1_048_577):
             with self.subTest(body_length=len(body)):
                 response = Mock()

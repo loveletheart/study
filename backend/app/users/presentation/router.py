@@ -15,7 +15,6 @@ router = APIRouter(prefix="/users", tags=["users"])
 UserServiceDependency = Annotated[UserService, Depends(get_user_service)]
 
 
-"""이름과 이메일로 사용자 등록"""
 @router.post(
     "",
     response_model=ApiResponse[UserResponse],
@@ -31,12 +30,12 @@ def create_user(
     service: UserServiceDependency,
     response: Response,
 ) -> ApiResponse[UserResponse]:
+    """이름과 이메일로 사용자 등록"""
     result = service.create_user(CreateUserCommand(name=body.name, email=body.email))
     response.headers["Location"] = f"/api/v1/users/{result.id}"
     return ApiResponse(data=UserResponse.model_validate(result))
 
 
-"""UUID로 사용자 정보 조회"""
 @router.get(
     "/{user_id}",
     response_model=ApiResponse[UserResponse],
@@ -50,5 +49,6 @@ def get_user(
     user_id: Annotated[UUID, Path(description="사용자 등록 응답에서 받은 UUID")],
     service: UserServiceDependency,
 ) -> ApiResponse[UserResponse]:
+    """UUID로 사용자 정보 조회"""
     result = service.get_user(user_id)
     return ApiResponse(data=UserResponse.model_validate(result))

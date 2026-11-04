@@ -19,8 +19,8 @@ class Settings:
     weather_cache_ttl_seconds: float = 600.0
 
 
-# 숫자 설정값과 허용 범위 검증
 def _number_setting(values: dict, key: str, default: float, minimum: float, maximum: float) -> float:
+    """숫자 설정값과 허용 범위 검증"""
     try:
         value = float(values.get(key) or default)
     except (TypeError, ValueError) as exc:
@@ -30,10 +30,10 @@ def _number_setting(values: dict, key: str, default: float, minimum: float, maxi
     return value
 
 
-# 환경변수와 .env 설정 로드
 @lru_cache
 def get_settings() -> Settings:
     # 실제 환경변수가 .env보다 우선한다. .env가 없어도 기본값으로 실행한다.
+    """환경변수와 .env 설정 로드"""
     values = {**dotenv_values(PROJECT_ROOT / ".env"), **os.environ}
     database_path = Path(values.get("STUDY_DATABASE_PATH") or "study.db")
     if not database_path.is_absolute():

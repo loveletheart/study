@@ -14,7 +14,6 @@ from app.common.errors.schemas import ErrorDetail, ErrorResponse
 logger = logging.getLogger(__name__)
 
 
-# 공통 오류 JSON 응답 생성
 def _error_response(
     code: ErrorCode,
     *,
@@ -23,6 +22,7 @@ def _error_response(
     status_code: int | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
+    """공통 오류 JSON 응답 생성"""
     spec = ERROR_SPECS[code]
     payload = ErrorResponse(
         code=code, message=message if message is not None else spec.message, details=details or [],
@@ -30,13 +30,13 @@ def _error_response(
     return JSONResponse(status_code=status_code or spec.status_code, content=payload.model_dump(mode="json"), headers=headers)
 
 
-# 업무 예외를 오류 응답으로 변환
 def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
+    """업무 예외를 오류 응답으로 변환"""
     return _error_response(exc.error_code, message=exc.message)
 
 
-# 입력 검증 오류를 422 응답으로 변환
 def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """입력 검증 오류를 422 응답으로 변환"""
     details = [ErrorDetail(
         field=".".join(str(part) for part in error.get("loc", ())),
         message=error.get("msg", "입력값이 올바르지 않습니다."),
@@ -45,8 +45,8 @@ def handle_validation_error(request: Request, exc: RequestValidationError) -> JS
     return _error_response(ErrorCode.COMMON_INVALID_REQUEST, details=details)
 
 
-# HTTP 예외의 상태와 헤더 유지
 def handle_http_error(request: Request, exc: HTTPException) -> JSONResponse:
+    """HTTP 예외의 상태와 헤더 유지"""
     code = {
         404: ErrorCode.COMMON_NOT_FOUND,
         405: ErrorCode.COMMON_METHOD_NOT_ALLOWED,
@@ -54,14 +54,14 @@ def handle_http_error(request: Request, exc: HTTPException) -> JSONResponse:
     return _error_response(code, status_code=exc.status_code, headers=exc.headers)
 
 
-# 내부 오류 기록 후 500 응답 반환
 def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    """내부 오류 기록 후 500 응답 반환"""
     logger.error("Unhandled API error: %s %s", request.method, request.url.path, exc_info=(type(exc), exc, exc.__traceback__))
     return _error_response(ErrorCode.COMMON_INTERNAL_ERROR)
 
 
-# 공통 예외 핸들러 등록
 def register_exception_handlers(app: FastAPI) -> None:
+    """공통 예외 핸들러 등록"""
     app.add_exception_handler(AppError, handle_app_error)
     app.add_exception_handler(RequestValidationError, handle_validation_error)
     app.add_exception_handler(HTTPException, handle_http_error)
