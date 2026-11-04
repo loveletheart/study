@@ -15,7 +15,7 @@
                 "--port",
                 "8000"
             ],
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/backend",
             "console": "integratedTerminal",
             "env": {
                 "VIRTUAL_ENV": "${workspaceFolder}/.venv",

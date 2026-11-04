@@ -62,10 +62,11 @@ try {
     $venvDirectory = Join-Path $PSScriptRoot '.venv'
     $venvPython = Join-Path $venvDirectory 'Scripts\python.exe'
     $activateScript = Join-Path $venvDirectory 'Scripts\Activate.ps1'
-    $requirements = Join-Path $PSScriptRoot 'requirements.txt'
+    $backendDirectory = Join-Path $PSScriptRoot 'backend'
+    $requirements = Join-Path $backendDirectory 'requirements.txt'
 
     if (-not (Test-Path -LiteralPath $requirements)) {
-        throw 'requirements.txt was not found.'
+        throw 'backend/requirements.txt was not found.'
     }
 
     if (-not (Test-Path -LiteralPath $venvPython) -or -not (Test-Path -LiteralPath $activateScript)) {
@@ -110,10 +111,12 @@ try {
         Write-Host '[setup] Ready.'
     }
     elseif ($Test) {
+        Set-Location -LiteralPath $backendDirectory
         & $venvPython -m unittest discover -s tests -v
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
     else {
+        Set-Location -LiteralPath $backendDirectory
         Write-Host "[server] http://127.0.0.1:$Port/docs"
         & $venvPython -m uvicorn main:app --host 127.0.0.1 --port $Port --reload
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
