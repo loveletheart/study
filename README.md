@@ -56,6 +56,8 @@ Python 코드는 `backend/`에 있고, `.venv`, `.env`, 실행 스크립트와 �
 
 로컬 추천은 Ollama 서버와 모델을 별도로 준비하고 `.env`의 `STUDY_LLM_MODEL`에 `ollama list`에 표시된 모델명을 입력하세요. 자동 전환을 끈 상태에서 모델이 미설정이면 `OUTFIT_LLM_NOT_CONFIGURED`(503)를 반환합니다. 서버가 모델을 자동 설치하거나 다운로드하지 않습니다.
 
+옷차림 추천은 지역·오늘/주간별로 SQLite에 저장합니다. 최근 24시간 안에 조회한 지역은 서버 실행 중 기본 1시간 간격으로 날씨와 추천을 다시 생성하며, 갱신 중인 조회에는 저장된 결과를 바로 제공합니다. 처음 조회하는 지역·종류는 생성 시간이 필요합니다. 저장 결과는 재시작 후에도 재사용하지만 한국 날짜가 바뀌거나 마지막 저장 후 갱신 주기의 3배(기본 3시간)를 넘으면 새로 생성합니다. `fetched_at`은 추천에 사용한 날씨의 조회 시각입니다. 자세한 갱신 정책은 [옷차림 기능 문서](backend/app/outfits/README.md#추천-저장과-시간별-갱신)를 참고하세요.
+
 Gemini 자동 전환은 기본적으로 꺼져 있습니다. 사용하려면 `.env`에 다음 값을 설정하고 서버를 재시작합니다. API 키는 Git에 올리지 않습니다.
 
 ```dotenv
@@ -64,7 +66,7 @@ GEMINI_API_KEY=발급받은_API_키
 STUDY_GEMINI_MODEL=gemini-flash-latest
 ```
 
-클라우드는 Google GenAI 공식 Python SDK와 JSON 스키마 출력을 사용합니다. 자동 전환 시 로컬 대기 제한은 기본 15초, Gemini는 60초입니다. 느린 로컬 모델은 대기 제한을 늘려 불필요한 전환을 줄이세요. 로컬 모델 미설정도 전환 대상이며, 로컬 성공 시 Gemini 키 확인과 호출을 건너뜁니다. 응답의 `data.engine`에서 실제 제공사·모델·전환 여부를 확인합니다.
+클라우드는 Google GenAI 공식 Python SDK와 JSON 스키마 출력을 사용합니다. 자동 전환을 켜도 로컬 대기 제한은 `STUDY_LLM_TIMEOUT_SECONDS`(기본 180초)를 유지하며, Gemini는 기본 60초입니다. 로컬 대기를 더 짧게 제한하려는 경우에만 `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS`를 지정하세요. 로컬 모델 미설정도 전환 대상이며, 로컬 성공 시 Gemini 키 확인과 호출을 건너뜁니다. 응답의 `data.engine`에서 실제 제공사·모델·전환 여부를 확인합니다.
 
 ## API 설명과 공통 오류
 
@@ -109,7 +111,8 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `STUDY_LLM_TIMEOUT_SECONDS` | `180` | 추론 응답 대기 시간(1~600초) |
 | `STUDY_LLM_CONTEXT_SIZE` | `16384` | 요청 문맥 길이(2048~131072 정수). 모델·메모리에 맞춰 조절 |
 | `STUDY_LLM_CLOUD_FALLBACK_ENABLED` | `false` | `true`일 때 로컬 실패 후 Gemini 한 번 호출 |
-| `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS` | `15` | 자동 전환 모드의 로컬 응답 대기 제한(1~600초). 기존 제한보다 늘리지는 않음 |
+| `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS` | 미설정 | 생략·빈 값이면 일반 로컬 대기 제한 유지. 지정하면 두 제한 중 작은 값 적용(1~600초) |
+| `STUDY_OUTFIT_REFRESH_SECONDS` | `3600` | 조회한 지역의 추천 갱신 간격(60~86400초). 서버 실행 중 동작 |
 | `GEMINI_API_KEY` | 빈 문자열 | Gemini API 키. 클라우드 전환 시 필요 |
 | `STUDY_GEMINI_MODEL` | 빈 문자열 | JSON 스키마 출력을 지원하는 Gemini 모델명. 예: `gemini-flash-latest` |
 | `STUDY_GEMINI_TIMEOUT_SECONDS` | `60` | Gemini 응답 대기 제한(1~300초) |
