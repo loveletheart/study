@@ -27,15 +27,22 @@ from app.common.errors.handlers import register_exception_handlers
 from app.common.errors.openapi import error_code_table, error_responses
 from app.common.responses import ApiResponse
 from app.outfits.presentation.router import router as outfits_router
+from app.outfits.bootstrap import get_cached_outfit_service
+from app.outfits.infrastructure.result_cache import OutfitRefreshWorker
 from app.users.presentation.router import router as users_router
 from app.weather.presentation.router import router as weather_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """서버 시작 시 DB 테이블 준비"""
+    """DB 준비와 저장된 지역의 추천 주기 갱신 시작·종료"""
     initialize_database()
-    yield
+    worker = OutfitRefreshWorker(get_cached_outfit_service())
+    worker.start()
+    try:
+        yield
+    finally:
+        worker.stop()
 
 
 app = FastAPI(

@@ -1,3 +1,7 @@
+import hashlib
+import json
+from functools import lru_cache
+
 from app.common.config import Settings, get_settings
 from app.outfits.application.fallback import FallbackOutfitRecommender
 from app.outfits.application.ports import OutfitRecommender
@@ -7,6 +11,8 @@ from app.outfits.infrastructure.ollama_recommender import OllamaOutfitRecommende
 from app.outfits.infrastructure.gemini_client import GeminiClient
 from app.outfits.infrastructure.gemini_recommender import GeminiOutfitRecommender
 from app.outfits.infrastructure.weather_reader import WeatherServiceReader
+from app.outfits.infrastructure.prompts import PROMPT_VERSION
+from app.outfits.infrastructure.result_cache import CachedOutfitService
 from app.weather.bootstrap import get_weather_service
 
 
@@ -26,10 +32,27 @@ def get_outfit_service() -> OutfitService:
     """날씨 조회와 로컬 우선 추천 구현 연결"""
     settings = get_settings()
     if settings.cloud_fallback_enabled:
-        timeout = min(settings.llm_timeout_seconds, settings.fallback_local_timeout_seconds)
+        timeout = settings.llm_timeout_seconds
+        if settings.fallback_local_timeout_seconds is not None:
+            timeout = min(timeout, settings.fallback_local_timeout_seconds)
         recommender: OutfitRecommender = FallbackOutfitRecommender(
             lambda: _local_recommender(settings, timeout), lambda: _cloud_recommender(settings),
         )
     else:
         recommender = _local_recommender(settings, settings.llm_timeout_seconds)
     return OutfitService(WeatherServiceReader(get_weather_service()), recommender)
+
+
+@lru_cache
+def get_cached_outfit_service() -> CachedOutfitService:
+    """같은 모델·프롬프트 설정의 추천을 서버 재시작 후에도 공유"""
+    settings = get_settings()
+    signature = json.dumps([
+        "outfit-cache-v1", PROMPT_VERSION, settings.llm_base_url, settings.llm_model,
+        settings.llm_context_size, settings.cloud_fallback_enabled, settings.gemini_model,
+        settings.gemini_max_output_tokens,
+    ])
+    scope = hashlib.sha256(signature.encode()).hexdigest()
+    return CachedOutfitService(
+        settings.database_path, scope, get_outfit_service, settings.outfit_refresh_seconds,
+    )

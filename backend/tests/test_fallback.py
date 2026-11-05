@@ -144,11 +144,18 @@ class FallbackTests(unittest.TestCase):
         """기본 로컬 전용과 명시적 전환 설정의 연결 정책 확인"""
         base = Settings("test", Path("unused.db"), llm_model="local")
         weather.return_value = self.fixture.weather_service
-        for enabled, normal_timeout, expected_timeout in [(False, 180, 180), (True, 180, 15), (True, 3, 3)]:
-            with self.subTest(enabled=enabled, timeout=normal_timeout):
+        for enabled, normal_timeout, fallback_timeout, expected_timeout in [
+            (False, 180, None, 180), (False, 180, 15, 180),
+            (True, 180, None, 180), (True, 300, None, 300), (True, 3, None, 3),
+            (True, 180, 15, 15), (True, 3, 15, 3), (True, 180, 300, 180),
+        ]:
+            with self.subTest(enabled=enabled, timeout=normal_timeout, fallback_timeout=fallback_timeout):
                 local.reset_mock()
                 cloud.reset_mock()
-                settings.return_value = replace(base, cloud_fallback_enabled=enabled, llm_timeout_seconds=normal_timeout)
+                settings.return_value = replace(
+                    base, cloud_fallback_enabled=enabled, llm_timeout_seconds=normal_timeout,
+                    fallback_local_timeout_seconds=fallback_timeout,
+                )
                 local.return_value = self.fixture.recommender
                 service = get_outfit_service()
                 service.get_today(37, 127)
@@ -174,7 +181,20 @@ class CloudSettingsTests(unittest.TestCase):
         self.assertFalse(settings.cloud_fallback_enabled)
         self.assertEqual(settings.gemini_api_key, "")
         self.assertEqual(settings.gemini_model, "")
-        self.assertEqual(settings.fallback_local_timeout_seconds, 15)
+        self.assertIsNone(settings.fallback_local_timeout_seconds)
+
+    def test_fallback_timeout_is_optional_and_preserves_explicit_limits(self):
+        """전환용 제한은 생략·빈 값이면 미설정, 명시한 값만 별도로 적용한다."""
+        for raw, expected in [(None, None), ("", None), ("  ", None), ("15", 15), ("300", 300)]:
+            with self.subTest(raw=raw):
+                self.dotenv.return_value = {
+                    "STUDY_LLM_TIMEOUT_SECONDS": "300",
+                    "STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS": raw,
+                }
+                get_settings.cache_clear()
+                settings = get_settings()
+                self.assertEqual(settings.llm_timeout_seconds, 300)
+                self.assertEqual(settings.fallback_local_timeout_seconds, expected)
 
     def test_dotenv_overrides_environment_and_hides_key_from_repr(self):
         """파일의 모델 우선 적용과 누락 항목의 환경변수 사용, 키 숨김 확인"""
