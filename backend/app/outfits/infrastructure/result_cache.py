@@ -6,6 +6,7 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from threading import Event, Lock, Thread
+from weakref import WeakValueDictionary
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -43,7 +44,8 @@ class CachedOutfitService:
         self._service_factory = service_factory
         self._refresh_seconds = refresh_seconds
         self._clock = clock or (lambda: datetime.now(KST))
-        self._generation_lock = Lock()
+        self._generation_locks = WeakValueDictionary()
+        self._generation_locks_guard = Lock()
         with closing(connect_database(database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(CREATE_CACHE_TABLE)
@@ -68,6 +70,15 @@ class CachedOutfitService:
         """제공사 설정·조회 종류·정확한 좌표로 저장 키 구성"""
         return self._scope, kind, latitude, longitude
 
+    def _lock_for(self, key: tuple):
+        """동일 키의 생성 잠금을 공유하고 사용자·대기자가 없으면 자동 회수"""
+        with self._generation_locks_guard:
+            generation_lock = self._generation_locks.get(key)
+            if generation_lock is None:
+                generation_lock = Lock()
+                self._generation_locks[key] = generation_lock
+            return generation_lock
+
     def _get(self, kind: str, latitude: float, longitude: float):
         """동시 최초 요청은 한 번만 생성하고 갱신 중에는 기존 결과 제공"""
         key = self._key(kind, latitude, longitude)
@@ -84,7 +95,7 @@ class CachedOutfitService:
         cached = self._read(key)
         if cached is not None:
             return cached
-        with self._generation_lock:
+        with self._lock_for(key):
             cached = self._read(key)
             if cached is not None:
                 return cached
@@ -143,7 +154,7 @@ class CachedOutfitService:
             if stopped is not None and stopped.is_set():
                 return
             key = self._key(row["kind"], row["latitude"], row["longitude"])
-            with self._generation_lock:
+            with self._lock_for(key):
                 if stopped is not None and stopped.is_set():
                     return
                 with closing(connect_database(self._database_path)) as connection:

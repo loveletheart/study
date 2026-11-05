@@ -152,6 +152,90 @@ class OutfitCacheTests(unittest.TestCase):
                 release.set()
             refresh.result(timeout=2)
 
+    def test_other_region_cold_request_does_not_wait_for_refresh(self):
+        """한 지역의 느린 갱신이 다른 지역의 최초 생성을 막지 않는다."""
+        first = self.cache.get_today(37, 127)
+        other = self.fixture.service.get_today(38, 127)
+        self.now += timedelta(hours=1)
+        started, release = Event(), Event()
+
+        def generate(latitude, longitude):
+            if latitude == 37:
+                started.set()
+                if not release.wait(5):
+                    raise AssertionError("Refresh was not released")
+                return first
+            return other
+
+        self.service.get_today.side_effect = generate
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            refresh = pool.submit(self.cache.refresh_due)
+            try:
+                self.assertTrue(started.wait(2))
+                read = pool.submit(self.cache.get_today, 38, 127)
+                self.assertEqual(read.result(timeout=2), other)
+            finally:
+                release.set()
+            refresh.result(timeout=2)
+
+    def test_other_kind_cold_request_does_not_wait_for_cold_generation(self):
+        """같은 좌표라도 오늘 생성 중 주간 최초 요청은 독립적으로 진행한다."""
+        today = self.fixture.service.get_today(37, 127)
+        weekly = self.fixture.service.get_weekly(37, 127)
+        started, release = Event(), Event()
+
+        def generate(latitude, longitude):
+            started.set()
+            if not release.wait(5):
+                raise AssertionError("Generation was not released")
+            return today
+
+        self.service.get_today.side_effect = generate
+        self.service.get_weekly.return_value = weekly
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(self.cache.get_today, 37, 127)
+            try:
+                self.assertTrue(started.wait(2))
+                second = pool.submit(self.cache.get_weekly, 37, 127)
+                self.assertEqual(second.result(timeout=2), weekly)
+            finally:
+                release.set()
+            self.assertEqual(first.result(timeout=2), today)
+
+    def test_same_key_expired_request_waits_for_refresh_without_duplicate_generation(self):
+        """만료된 동일 키 요청은 진행 중인 갱신을 기다리고 결과를 재사용한다."""
+        first = self.cache.get_today(37, 127)
+        self.now += timedelta(hours=4)
+        started, release, lock_requested = Event(), Event(), Event()
+
+        def generate(latitude, longitude):
+            started.set()
+            if not release.wait(5):
+                raise AssertionError("Refresh was not released")
+            return first
+
+        original_lock_for = self.cache._lock_for
+
+        def request_lock(key):
+            lock_requested.set()
+            return original_lock_for(key)
+
+        self.service.get_today.side_effect = generate
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            refresh = pool.submit(self.cache.refresh_due)
+            try:
+                self.assertTrue(started.wait(2))
+                with patch.object(self.cache, "_lock_for", side_effect=request_lock):
+                    read = pool.submit(self.cache.get_today, 37, 127)
+                    self.assertTrue(lock_requested.wait(2))
+                    self.assertFalse(read.done())
+                    release.set()
+                    self.assertEqual(read.result(timeout=2), first)
+            finally:
+                release.set()
+            refresh.result(timeout=2)
+        self.assertEqual(self.factory.call_count, 2)
+
     def test_first_failure_is_not_cached_and_abandoned_regions_stop_refreshing(self):
         """최초 실패 결과는 저장하지 않고 24시간 미조회 지역은 갱신하지 않는다."""
         self.service.get_today.side_effect = OutfitLlmTimeoutError()
