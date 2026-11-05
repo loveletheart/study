@@ -4,8 +4,8 @@ from app.outfits.application.ports import OutfitRecommender
 from app.outfits.application.services import OutfitService
 from app.outfits.infrastructure.ollama_client import OllamaClient
 from app.outfits.infrastructure.ollama_recommender import OllamaOutfitRecommender
-from app.outfits.infrastructure.openai_client import OpenAIClient
-from app.outfits.infrastructure.openai_recommender import OpenAIOutfitRecommender
+from app.outfits.infrastructure.gemini_client import GeminiClient
+from app.outfits.infrastructure.gemini_recommender import GeminiOutfitRecommender
 from app.outfits.infrastructure.weather_reader import WeatherServiceReader
 from app.weather.bootstrap import get_weather_service
 
@@ -17,9 +17,9 @@ def _local_recommender(settings: Settings, timeout_seconds: float) -> OutfitReco
 
 
 def _cloud_recommender(settings: Settings) -> OutfitRecommender:
-    """클라우드 전환 시에만 OpenAI 설정 확인"""
-    client = OpenAIClient(settings.openai_api_key, settings.openai_timeout_seconds, settings.openai_max_output_tokens)
-    return OpenAIOutfitRecommender(client, settings.openai_model)
+    """클라우드 전환 시에만 Gemini 설정을 확인하고 추천 구현을 생성한다."""
+    client = GeminiClient(settings.gemini_api_key, settings.gemini_timeout_seconds, settings.gemini_max_output_tokens)
+    return GeminiOutfitRecommender(client, settings.gemini_model)
 
 
 def get_outfit_service() -> OutfitService:

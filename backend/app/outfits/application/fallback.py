@@ -33,6 +33,6 @@ class FallbackOutfitRecommender:
             return self._local().recommend(days)
         except FALLBACK_ERRORS as exc:
             reason = exc.error_code.value
-            logger.warning("Local outfit LLM failed (%s); trying cloud fallback", reason)
+            logger.warning("로컬 옷차림 LLM 실패(%s): Gemini 자동 전환 시도", reason)
         generated = self._cloud().recommend(days)
         return replace(generated, engine=replace(generated.engine, fallback_used=True, fallback_reason=reason))

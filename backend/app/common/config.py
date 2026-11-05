@@ -24,10 +24,10 @@ class Settings:
     llm_context_size: int = 16384
     cloud_fallback_enabled: bool = False
     fallback_local_timeout_seconds: float = 15.0
-    openai_api_key: str = field(default="", repr=False)
-    openai_model: str = ""
-    openai_timeout_seconds: float = 60.0
-    openai_max_output_tokens: int = 8192
+    gemini_api_key: str = field(default="", repr=False)
+    gemini_model: str = ""
+    gemini_timeout_seconds: float = 60.0
+    gemini_max_output_tokens: int = 8192
 
 
 def _number_setting(values: dict, key: str, default: float, minimum: float, maximum: float) -> float:
@@ -88,8 +88,8 @@ def get_settings() -> Settings:
         llm_context_size=_integer_setting(values, "STUDY_LLM_CONTEXT_SIZE", 16384, 2048, 131072),
         cloud_fallback_enabled=_boolean_setting(values, "STUDY_LLM_CLOUD_FALLBACK_ENABLED"),
         fallback_local_timeout_seconds=_number_setting(values, "STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS", 15, 1, 600),
-        openai_api_key=(values.get("OPENAI_API_KEY") or "").strip(),
-        openai_model=(values.get("STUDY_OPENAI_MODEL") or "").strip(),
-        openai_timeout_seconds=_number_setting(values, "STUDY_OPENAI_TIMEOUT_SECONDS", 60, 1, 300),
-        openai_max_output_tokens=_integer_setting(values, "STUDY_OPENAI_MAX_OUTPUT_TOKENS", 8192, 128, 32768),
+        gemini_api_key=(values.get("GEMINI_API_KEY") or "").strip(),
+        gemini_model=(values.get("STUDY_GEMINI_MODEL") or "").strip(),
+        gemini_timeout_seconds=_number_setting(values, "STUDY_GEMINI_TIMEOUT_SECONDS", 60, 1, 300),
+        gemini_max_output_tokens=_integer_setting(values, "STUDY_GEMINI_MAX_OUTPUT_TOKENS", 8192, 128, 32768),
     )

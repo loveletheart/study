@@ -23,7 +23,7 @@ class StartupTests(unittest.TestCase):
             # 환경 준비 과정 자체에는 외부 패키지가 필요 없으므로 네트워크 없이 검증합니다.
             (checkout / "backend").mkdir()
             requirements = checkout / "backend" / "requirements.txt"
-            requirements.write_text("# 환경 준비 과정의 회귀 테스트\n", encoding="utf-8")
+            requirements.write_text("# 환경 준비 과정의 회귀 테스트\n", encoding="utf-8-sig")
             env = {**os.environ, "PIP_NO_INDEX": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
 
             def setup(python_override: bool = True) -> subprocess.CompletedProcess:

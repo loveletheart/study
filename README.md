@@ -52,19 +52,19 @@ Python 코드는 `backend/`에 있고, `.venv`, `.env`, 실행 스크립트와 �
 | `GET /api/v1/outfits/today?latitude=37.5665&longitude=126.978` | 오늘의 베스트·워스트 옷차림과 추천 이유 |
 | `GET /api/v1/outfits/weekly?latitude=37.5665&longitude=126.978` | 오늘부터 7일 옷차림과 중복 없는 주간 준비 의류 |
 
-기존 날씨 조회와 캐시를 재사용하고 날씨를 로컬 Ollama에 전달해 옷차림을 생성합니다. 설정을 켜면 로컬 실패 시 OpenAI API로 자동 전환합니다. 사용 모델은 직접 설정하며 이미지와 인기 순위는 후속 작업입니다. 연결 방법과 응답 형식은 [옷차림 기능 문서](backend/app/outfits/README.md)를 참고하세요.
+기존 날씨 조회와 캐시를 재사용하고 날씨를 로컬 Ollama에 전달해 옷차림을 생성합니다. 설정을 켜면 로컬 실패 시 Gemini API로 자동 전환합니다. 사용 모델은 직접 설정하며 이미지와 인기 순위는 후속 작업입니다. 연결 방법과 응답 형식은 [옷차림 기능 문서](backend/app/outfits/README.md)를 참고하세요.
 
 로컬 추천은 Ollama 서버와 모델을 별도로 준비하고 `.env`의 `STUDY_LLM_MODEL`에 `ollama list`에 표시된 모델명을 입력하세요. 자동 전환을 끈 상태에서 모델이 미설정이면 `OUTFIT_LLM_NOT_CONFIGURED`(503)를 반환합니다. 서버가 모델을 자동 설치하거나 다운로드하지 않습니다.
 
-OpenAI 자동 전환은 기본적으로 꺼져 있습니다. 사용하려면 `.env`에 다음 값을 설정하고 서버를 재시작합니다. API 키는 Git에 올리지 않습니다.
+Gemini 자동 전환은 기본적으로 꺼져 있습니다. 사용하려면 `.env`에 다음 값을 설정하고 서버를 재시작합니다. API 키는 Git에 올리지 않습니다.
 
 ```dotenv
 STUDY_LLM_CLOUD_FALLBACK_ENABLED=true
-OPENAI_API_KEY=발급받은_API_키
-STUDY_OPENAI_MODEL=사용할_API_모델명
+GEMINI_API_KEY=발급받은_API_키
+STUDY_GEMINI_MODEL=gemini-flash-latest
 ```
 
-모델은 Responses API와 Structured Outputs를 지원해야 합니다. ChatGPT 웹 구독과 OpenAI API 과금은 별도입니다. 자동 전환 시 로컬 요청의 응답 대기 제한은 기본 15초, OpenAI는 60초입니다. 로컬 모델 미설정도 전환 대상이며, 로컬이 성공하면 OpenAI 키 확인과 호출을 건너뜁니다. 응답의 `data.engine`에서 실제 제공사·모델·전환 여부를 확인합니다.
+클라우드는 Google GenAI 공식 Python SDK와 JSON 스키마 출력을 사용합니다. 자동 전환 시 로컬 대기 제한은 기본 15초, Gemini는 60초입니다. 느린 로컬 모델은 대기 제한을 늘려 불필요한 전환을 줄이세요. 로컬 모델 미설정도 전환 대상이며, 로컬 성공 시 Gemini 키 확인과 호출을 건너뜁니다. 응답의 `data.engine`에서 실제 제공사·모델·전환 여부를 확인합니다.
 
 ## API 설명과 공통 오류
 
@@ -96,7 +96,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 
 ## 설정과 DB
 
-`.env`가 없어도 기본값으로 실행됩니다. 설정을 변경하려면 `.env.example`을 `.env`로 복사합니다.
+`.env`가 없어도 기본값으로 실행됩니다. 설정을 변경하려면 프로젝트 루트에 `.env`를 만들고 아래 설정값을 입력합니다.
 
 | 설정 | 기본값 | 의미 |
 | --- | --- | --- |
@@ -108,12 +108,12 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `STUDY_LLM_MODEL` | 빈 문자열 | 직접 준비한 로컬 모델명 |
 | `STUDY_LLM_TIMEOUT_SECONDS` | `180` | 추론 응답 대기 시간(1~600초) |
 | `STUDY_LLM_CONTEXT_SIZE` | `16384` | 요청 문맥 길이(2048~131072 정수). 모델·메모리에 맞춰 조절 |
-| `STUDY_LLM_CLOUD_FALLBACK_ENABLED` | `false` | `true`일 때 로컬 실패 후 OpenAI 한 번 호출 |
+| `STUDY_LLM_CLOUD_FALLBACK_ENABLED` | `false` | `true`일 때 로컬 실패 후 Gemini 한 번 호출 |
 | `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS` | `15` | 자동 전환 모드의 로컬 응답 대기 제한(1~600초). 기존 제한보다 늘리지는 않음 |
-| `OPENAI_API_KEY` | 빈 문자열 | OpenAI API 키. 클라우드 전환 시 필요 |
-| `STUDY_OPENAI_MODEL` | 빈 문자열 | Responses API·구조화 출력을 지원하는 API 모델명 |
-| `STUDY_OPENAI_TIMEOUT_SECONDS` | `60` | OpenAI 응답 대기 제한(1~300초) |
-| `STUDY_OPENAI_MAX_OUTPUT_TOKENS` | `8192` | OpenAI 추론·출력 토큰 상한(128~32768 정수). 요청 횟수나 총 비용 상한은 아님 |
+| `GEMINI_API_KEY` | 빈 문자열 | Gemini API 키. 클라우드 전환 시 필요 |
+| `STUDY_GEMINI_MODEL` | 빈 문자열 | JSON 스키마 출력을 지원하는 Gemini 모델명. 예: `gemini-flash-latest` |
+| `STUDY_GEMINI_TIMEOUT_SECONDS` | `60` | Gemini 응답 대기 제한(1~300초) |
+| `STUDY_GEMINI_MAX_OUTPUT_TOKENS` | `8192` | Gemini 출력 토큰 상한(128~32768 정수). 모델에 따라 내부 추론도 한도에 포함될 수 있음 |
 
 실제 환경변수가 `.env` 값보다 우선합니다. 상대 DB 경로는 프로젝트 루트 기준입니다. 서버 시작 시 테이블이 없으면 생성하고, 사용자 데이터는 DB 파일에 저장합니다. DB 파일과 `.env`는 Git에서 제외합니다.
 
@@ -130,7 +130,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `backend/app/common/database.py` | DB 연결과 개발용 테이블 초기화 |
 | `backend/app/common/responses.py` | 모든 API의 공통 응답 형식 |
 | `backend/app/common/errors/` | 공통 오류 코드·응답 모델·예외 핸들러·Swagger 오류 문서 |
-| `backend/app/outfits/` | 날씨 기반 LLM 추천·OpenAI 자동 전환·오늘/주간 조회·응답 검증 |
+| `backend/app/outfits/` | 날씨 기반 LLM 추천·Gemini 자동 전환·오늘/주간 조회·응답 검증 |
 | `backend/app/users/presentation/router.py` | HTTP 요청, Service 호출, 상태 코드·응답 반환 |
 | `backend/app/users/presentation/schemas.py` | Pydantic 요청·응답 형식 |
 | `backend/app/users/application/services.py` | 사용자 등록·조회 절차와 트랜잭션 범위 |

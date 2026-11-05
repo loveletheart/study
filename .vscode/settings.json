@@ -3,5 +3,6 @@
     "python.terminal.activateEnvironment": true,
     "python.analysis.extraPaths": ["./backend"],
     "python.analysis.useLibraryCodeForTypes": true,
-    "python.analysis.languageServerMode": "default"
+    "python.analysis.languageServerMode": "default",
+    "python.terminal.useEnvFile": true
 }

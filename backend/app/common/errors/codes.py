@@ -67,10 +67,10 @@ ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
     ErrorCode.OUTFIT_LLM_MODEL_NOT_FOUND: ErrorSpec(503, "설정한 모델을 로컬 LLM 서버에서 찾을 수 없습니다."),
     ErrorCode.OUTFIT_LLM_TIMEOUT: ErrorSpec(504, "로컬 LLM의 추천 생성 시간이 초과되었습니다."),
     ErrorCode.OUTFIT_LLM_INVALID_RESPONSE: ErrorSpec(502, "로컬 LLM이 올바른 옷차림 응답을 생성하지 못했습니다."),
-    ErrorCode.OUTFIT_CLOUD_NOT_CONFIGURED: ErrorSpec(503, "OpenAI API 키와 사용할 API 모델명을 설정해 주세요."),
+    ErrorCode.OUTFIT_CLOUD_NOT_CONFIGURED: ErrorSpec(503, "Gemini API 키와 사용할 API 모델명을 설정해 주세요."),
     ErrorCode.OUTFIT_CLOUD_UNAVAILABLE: ErrorSpec(503, "클라우드 LLM 연결과 API 모델 설정을 확인해 주세요."),
-    ErrorCode.OUTFIT_CLOUD_AUTH_ERROR: ErrorSpec(503, "OpenAI API 키 또는 접근 권한을 확인해 주세요."),
-    ErrorCode.OUTFIT_CLOUD_RATE_LIMITED: ErrorSpec(503, "OpenAI API 요청 한도 또는 사용 가능 크레딧을 확인해 주세요."),
+    ErrorCode.OUTFIT_CLOUD_AUTH_ERROR: ErrorSpec(503, "Gemini API 키 또는 접근 권한을 확인해 주세요."),
+    ErrorCode.OUTFIT_CLOUD_RATE_LIMITED: ErrorSpec(503, "Gemini API 요청 한도 또는 사용 가능 크레딧을 확인해 주세요."),
     ErrorCode.OUTFIT_CLOUD_TIMEOUT: ErrorSpec(504, "클라우드 LLM의 추천 생성 시간이 초과되었습니다."),
     ErrorCode.OUTFIT_CLOUD_INVALID_RESPONSE: ErrorSpec(502, "클라우드 LLM이 올바른 옷차림 응답을 생성하지 못했습니다."),
 })

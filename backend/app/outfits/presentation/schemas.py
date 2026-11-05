@@ -61,7 +61,7 @@ class WeeklyWardrobeResponse(AttributeResponse):
 
 
 class RecommendationEngineResponse(AttributeResponse):
-    provider: str = Field(description="옷차림 생성 제공사. ollama 또는 openai")
+    provider: str = Field(description="옷차림 생성 제공사. ollama 또는 gemini")
     model: str = Field(description="추천에 실제 사용한 모델명")
     prompt_version: str = Field(description="추천 프롬프트 버전")
     fallback_used: bool = Field(description="로컬 실패 후 클라우드로 자동 전환했는지 여부")
