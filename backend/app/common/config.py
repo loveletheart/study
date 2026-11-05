@@ -72,8 +72,8 @@ def _boolean_setting(values: dict, key: str, default: bool = False) -> bool:
 @lru_cache
 def get_settings() -> Settings:
     """환경변수와 .env 설정 로드"""
-    # 실제 환경변수가 .env보다 우선한다. .env가 없어도 기본값으로 실행한다.
-    values = {**dotenv_values(PROJECT_ROOT / ".env"), **os.environ}
+    # .env에 작성한 값을 우선하고, 없는 항목은 환경변수와 기본값을 사용한다.
+    values = {**os.environ, **dotenv_values(PROJECT_ROOT / ".env")}
     database_path = Path(values.get("STUDY_DATABASE_PATH") or "study.db")
     if not database_path.is_absolute():
         database_path = PROJECT_ROOT / database_path

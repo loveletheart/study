@@ -281,11 +281,11 @@ class LlmSettingsTests(unittest.TestCase):
         self.assertEqual(settings.llm_timeout_seconds, 180)
         self.assertEqual(settings.llm_context_size, 16384)
 
-    def test_environment_overrides_dotenv_and_keeps_the_exact_model_name(self):
-        """환경변수를 우선해 모델명과 접속 주소 지정"""
-        self.dotenv.return_value = {"STUDY_LLM_MODEL": "dotenv-model"}
+    def test_dotenv_overrides_environment_and_keeps_the_exact_model_name(self):
+        """파일의 모델명을 우선하고 없는 접속 설정은 환경변수에서 읽기"""
+        self.dotenv.return_value = {"STUDY_LLM_MODEL": " custom-model:tag "}
         with patch.dict(os.environ, {
-            "STUDY_LLM_MODEL": " custom-model:tag ", "STUDY_LLM_BASE_URL": "http://localhost:11434/",
+            "STUDY_LLM_MODEL": "environment-model", "STUDY_LLM_BASE_URL": "http://localhost:11434/",
             "STUDY_LLM_TIMEOUT_SECONDS": "300", "STUDY_LLM_CONTEXT_SIZE": "8192",
         }):
             settings = get_settings()

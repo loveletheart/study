@@ -176,14 +176,14 @@ class CloudSettingsTests(unittest.TestCase):
         self.assertEqual(settings.gemini_model, "")
         self.assertEqual(settings.fallback_local_timeout_seconds, 15)
 
-    def test_environment_overrides_dotenv_and_hides_key_from_repr(self):
-        """환경변수 우선과 설정 문자열의 키 제외 확인"""
-        self.dotenv.return_value = {"STUDY_GEMINI_MODEL": "dotenv-model"}
+    def test_dotenv_overrides_environment_and_hides_key_from_repr(self):
+        """파일의 모델 우선 적용과 누락 항목의 환경변수 사용, 키 숨김 확인"""
+        self.dotenv.return_value = {"STUDY_GEMINI_MODEL": " dotenv-model "}
         with patch.dict(os.environ, {"STUDY_LLM_CLOUD_FALLBACK_ENABLED": "true", "GEMINI_API_KEY": "test-secret",
                                     "STUDY_GEMINI_MODEL": " api-model ", "STUDY_GEMINI_MAX_OUTPUT_TOKENS": "4096"}):
             settings = get_settings()
         self.assertTrue(settings.cloud_fallback_enabled)
-        self.assertEqual(settings.gemini_model, "api-model")
+        self.assertEqual(settings.gemini_model, "dotenv-model")
         self.assertEqual(settings.gemini_max_output_tokens, 4096)
         self.assertNotIn("test-secret", repr(settings))
 

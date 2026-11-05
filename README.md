@@ -115,7 +115,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `STUDY_GEMINI_TIMEOUT_SECONDS` | `60` | Gemini 응답 대기 제한(1~300초) |
 | `STUDY_GEMINI_MAX_OUTPUT_TOKENS` | `8192` | Gemini 출력 토큰 상한(128~32768 정수). 모델에 따라 내부 추론도 한도에 포함될 수 있음 |
 
-실제 환경변수가 `.env` 값보다 우선합니다. 상대 DB 경로는 프로젝트 루트 기준입니다. 서버 시작 시 테이블이 없으면 생성하고, 사용자 데이터는 DB 파일에 저장합니다. DB 파일과 `.env`는 Git에서 제외합니다.
+설정 우선순위는 프로젝트 루트의 `.env` → 환경변수 → 코드 기본값입니다. `.env`에 작성한 값은 같은 이름의 환경변수보다 우선합니다. 파일 수정 후 서버를 재시작하면 반영됩니다. VS Code의 `python.terminal.useEnvFile`은 `false`로 두어도 코드가 직접 `.env`를 읽습니다. 상대 DB 경로는 프로젝트 루트 기준입니다. 서버 시작 시 테이블이 없으면 생성하고, 사용자 데이터는 DB 파일에 저장합니다. DB 파일과 `.env`는 Git에서 제외합니다.
 
 현재 추가 패키지 다운로드가 제한되어 Python 기본 `sqlite3` 드라이버를 사용합니다. `models.py`는 SQL 테이블 정의와 행 매핑을 담으며 SQLAlchemy ORM 모델은 아닙니다. ORM 도입 시 infrastructure의 모델·저장소·Unit of Work 및 common의 연결 설정을 교체하고 domain과 application의 계약을 유지할 수 있습니다. DB 테이블 구조 변경을 자동 반영하는 마이그레이션 도구는 아직 구성하지 않았습니다.
 
