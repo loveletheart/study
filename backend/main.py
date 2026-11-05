@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
-# The editor's "Run Python File" button also uses the same environment setup.
-# This must run before importing any third-party application dependency.
+# 편집기의 "Run Python File" 버튼으로 실행할 때도 동일한 환경 준비 과정을 거칩니다.
+# 외부 패키지를 가져오기 전에 실행 스크립트로 위임해야 합니다.
 if __name__ == "__main__":
     from pathlib import Path
     from subprocess import call

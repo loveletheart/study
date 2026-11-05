@@ -1,4 +1,5 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# 위 지시문은 편집기에서 설정 형식을 검사하고 자동 완성을 제공하는 데 사용합니다.
 language: ko-KR
 
 reviews:

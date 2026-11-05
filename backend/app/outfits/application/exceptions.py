@@ -36,3 +36,39 @@ class OutfitLlmResponseError(AppError):
     """LLM 응답 형식이나 날짜가 요청과 다름."""
 
     error_code = ErrorCode.OUTFIT_LLM_INVALID_RESPONSE
+
+
+class OutfitCloudNotConfiguredError(AppError):
+    """클라우드 API 키 또는 모델 미설정."""
+
+    error_code = ErrorCode.OUTFIT_CLOUD_NOT_CONFIGURED
+
+
+class OutfitCloudUnavailableError(AppError):
+    """클라우드 연결 또는 추론 실패."""
+
+    error_code = ErrorCode.OUTFIT_CLOUD_UNAVAILABLE
+
+
+class OutfitCloudAuthError(AppError):
+    """클라우드 API 인증 또는 권한 부족."""
+
+    error_code = ErrorCode.OUTFIT_CLOUD_AUTH_ERROR
+
+
+class OutfitCloudRateLimitError(AppError):
+    """클라우드 요청 한도 또는 크레딧 부족."""
+
+    error_code = ErrorCode.OUTFIT_CLOUD_RATE_LIMITED
+
+
+class OutfitCloudTimeoutError(AppError):
+    """클라우드 응답 시간 초과."""
+
+    error_code = ErrorCode.OUTFIT_CLOUD_TIMEOUT
+
+
+class OutfitCloudResponseError(AppError):
+    """클라우드 출력 형식 또는 날짜 오류."""
+
+    error_code = ErrorCode.OUTFIT_CLOUD_INVALID_RESPONSE

@@ -61,9 +61,11 @@ class WeeklyWardrobeResponse(AttributeResponse):
 
 
 class RecommendationEngineResponse(AttributeResponse):
-    provider: str = Field(description="옷차림 생성 제공사. 현재 ollama")
-    model: str = Field(description="추천에 사용한 로컬 모델명")
+    provider: str = Field(description="옷차림 생성 제공사. ollama 또는 openai")
+    model: str = Field(description="추천에 실제 사용한 모델명")
     prompt_version: str = Field(description="추천 프롬프트 버전")
+    fallback_used: bool = Field(description="로컬 실패 후 클라우드로 자동 전환했는지 여부")
+    fallback_reason: str | None = Field(description="전환 원인이 된 공통 오류 코드. 전환하지 않으면 null")
 
 
 class OutfitMetadataResponse(AttributeResponse):

@@ -26,6 +26,8 @@ class RecommendationEngine:
     provider: str
     model: str
     prompt_version: str
+    fallback_used: bool = False
+    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True)

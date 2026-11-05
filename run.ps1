@@ -51,7 +51,7 @@ function Find-BootstrapPython {
             }
         }
         catch {
-            # Try the next installed interpreter if a launcher or alias is broken.
+            # 실행기나 별칭이 정상 동작하지 않으면 다음 Python 실행 파일을 확인합니다.
         }
     }
     throw 'Python 3.11+ was not found. Install Python or pass -Python with its executable path.'
@@ -79,7 +79,7 @@ try {
         }
     }
 
-    # Activate before installing dependencies or starting application Python.
+    # 패키지를 설치하거나 애플리케이션을 실행하기 전에 가상환경을 활성화합니다.
     . $activateScript
     & $venvPython -c 'import pathlib, sys; expected = pathlib.Path(sys.argv[1]).resolve(); sys.exit(0 if sys.prefix != sys.base_prefix and pathlib.Path(sys.prefix).resolve() == expected else 1)' $venvDirectory
     if ($LASTEXITCODE -ne 0) {

@@ -2,7 +2,7 @@
 
 import os
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -22,6 +22,12 @@ class Settings:
     llm_model: str = ""
     llm_timeout_seconds: float = 180.0
     llm_context_size: int = 16384
+    cloud_fallback_enabled: bool = False
+    fallback_local_timeout_seconds: float = 15.0
+    openai_api_key: str = field(default="", repr=False)
+    openai_model: str = ""
+    openai_timeout_seconds: float = 60.0
+    openai_max_output_tokens: int = 8192
 
 
 def _number_setting(values: dict, key: str, default: float, minimum: float, maximum: float) -> float:
@@ -47,12 +53,20 @@ def _llm_base_url(value: str) -> str:
     return value.rstrip("/")
 
 
-def _context_size(values: dict) -> int:
-    """LLM 문맥 길이의 정수 범위 검증"""
-    value = _number_setting(values, "STUDY_LLM_CONTEXT_SIZE", 16384, 2048, 131072)
+def _integer_setting(values: dict, key: str, default: int, minimum: int, maximum: int) -> int:
+    """정수 설정값과 허용 범위 검증"""
+    value = _number_setting(values, key, default, minimum, maximum)
     if not value.is_integer():
-        raise ValueError("STUDY_LLM_CONTEXT_SIZE must be an integer.")
+        raise ValueError(f"{key} must be an integer.")
     return int(value)
+
+
+def _boolean_setting(values: dict, key: str, default: bool = False) -> bool:
+    """명시적으로 지정한 불리언 설정 검증"""
+    raw = str(values.get(key) or str(default)).strip().lower()
+    if raw not in {"true", "false"}:
+        raise ValueError(f"{key} must be true or false.")
+    return raw == "true"
 
 
 @lru_cache
@@ -71,5 +85,11 @@ def get_settings() -> Settings:
         llm_base_url=_llm_base_url((values.get("STUDY_LLM_BASE_URL") or "http://127.0.0.1:11434").strip()),
         llm_model=(values.get("STUDY_LLM_MODEL") or "").strip(),
         llm_timeout_seconds=_number_setting(values, "STUDY_LLM_TIMEOUT_SECONDS", 180, 1, 600),
-        llm_context_size=_context_size(values),
+        llm_context_size=_integer_setting(values, "STUDY_LLM_CONTEXT_SIZE", 16384, 2048, 131072),
+        cloud_fallback_enabled=_boolean_setting(values, "STUDY_LLM_CLOUD_FALLBACK_ENABLED"),
+        fallback_local_timeout_seconds=_number_setting(values, "STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS", 15, 1, 600),
+        openai_api_key=(values.get("OPENAI_API_KEY") or "").strip(),
+        openai_model=(values.get("STUDY_OPENAI_MODEL") or "").strip(),
+        openai_timeout_seconds=_number_setting(values, "STUDY_OPENAI_TIMEOUT_SECONDS", 60, 1, 300),
+        openai_max_output_tokens=_integer_setting(values, "STUDY_OPENAI_MAX_OUTPUT_TOKENS", 8192, 128, 32768),
     )
