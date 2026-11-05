@@ -20,10 +20,10 @@ class StartupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="study startup ") as directory:
             checkout = Path(directory)
             shutil.copy2(project_root / "run.ps1", checkout / "run.ps1")
-            # Bootstrap itself needs no third-party packages; keep this test offline.
+            # 환경 준비 과정 자체에는 외부 패키지가 필요 없으므로 네트워크 없이 검증합니다.
             (checkout / "backend").mkdir()
             requirements = checkout / "backend" / "requirements.txt"
-            requirements.write_text("# bootstrap regression test\n", encoding="utf-8")
+            requirements.write_text("# 환경 준비 과정의 회귀 테스트\n", encoding="utf-8-sig")
             env = {**os.environ, "PIP_NO_INDEX": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
 
             def setup(python_override: bool = True) -> subprocess.CompletedProcess:
@@ -42,7 +42,7 @@ class StartupTests(unittest.TestCase):
                 self.assertIn(b"[venv] Active:", result.stdout)
                 return result
 
-            # No .venv exists at all, and the script is called from another cwd.
+            # 가상환경이 없는 상태에서 다른 작업 디렉터리를 기준으로 스크립트를 실행합니다.
             setup(python_override=False)
             venv = checkout / ".venv"
             python = venv / "Scripts" / "python.exe"
@@ -56,20 +56,20 @@ class StartupTests(unittest.TestCase):
             self.assertEqual(Path(prefix).resolve(), venv.resolve())
             self.assertNotEqual(prefix, base_prefix)
 
-            # An existing environment is reused without deleting its files.
+            # 기존 가상환경의 파일을 삭제하지 않고 재사용하는지 확인합니다.
             marker = venv / "reuse-marker.txt"
             marker.write_text("keep", encoding="utf-8")
             reused = setup()
             self.assertNotIn(b"Creating or repairing", reused.stdout)
             self.assertTrue(marker.is_file())
 
-            # Reproduce the original partially created environment.
+            # 활성화 스크립트가 누락된 불완전한 가상환경을 재현합니다.
             activate.unlink()
             setup()
             self.assertTrue(activate.is_file())
             self.assertTrue(marker.is_file())
 
-            # Installation failure must stop before application startup.
+            # 패키지 설치에 실패하면 애플리케이션을 시작하기 전에 중단해야 합니다.
             requirements.write_text("study-bootstrap-nonexistent-package==0.0.0\n", encoding="utf-8")
             failed = subprocess.run(
                 ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(checkout / "run.ps1")],

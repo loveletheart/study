@@ -1,6 +1,6 @@
 # FastAPI와 DDD 학습 프로젝트
 
-업무별로 폴더를 나누고, 각 업무 내부를 presentation / application / domain / infrastructure 계층으로 구성합니다. 현재는 날씨 조회 기능과 사용자 등록·단건 조회 예시를 구현했습니다. 비밀번호·로그인·인증은 포함하지 않습니다.
+업무별로 폴더를 나누고, 각 업무 내부를 presentation / application / domain / infrastructure 계층으로 구성합니다. 현재는 날씨 조회, 날씨 기반 옷차림 추천과 사용자 등록·단건 조회 예시를 구현했습니다. 비밀번호·로그인·인증은 포함하지 않습니다.
 
 ## 실행
 
@@ -45,6 +45,27 @@ Python 코드는 `backend/`에 있고, `.venv`, `.env`, 실행 스크립트와 �
 
 응답 필드·오류 코드·캐시 동작은 [날씨 기능 문서](backend/app/weather/README.md)에 정리했습니다.
 
+## 옷차림 추천 API
+
+| API | 역할 |
+| --- | --- |
+| `GET /api/v1/outfits/today?latitude=37.5665&longitude=126.978` | 오늘의 베스트·워스트 옷차림과 추천 이유 |
+| `GET /api/v1/outfits/weekly?latitude=37.5665&longitude=126.978` | 오늘부터 7일 옷차림과 중복 없는 주간 준비 의류 |
+
+기존 날씨 조회와 캐시를 재사용하고 날씨를 로컬 Ollama에 전달해 옷차림을 생성합니다. 설정을 켜면 로컬 실패 시 Gemini API로 자동 전환합니다. 사용 모델은 직접 설정하며 이미지와 인기 순위는 후속 작업입니다. 연결 방법과 응답 형식은 [옷차림 기능 문서](backend/app/outfits/README.md)를 참고하세요.
+
+로컬 추천은 Ollama 서버와 모델을 별도로 준비하고 `.env`의 `STUDY_LLM_MODEL`에 `ollama list`에 표시된 모델명을 입력하세요. 자동 전환을 끈 상태에서 모델이 미설정이면 `OUTFIT_LLM_NOT_CONFIGURED`(503)를 반환합니다. 서버가 모델을 자동 설치하거나 다운로드하지 않습니다.
+
+Gemini 자동 전환은 기본적으로 꺼져 있습니다. 사용하려면 `.env`에 다음 값을 설정하고 서버를 재시작합니다. API 키는 Git에 올리지 않습니다.
+
+```dotenv
+STUDY_LLM_CLOUD_FALLBACK_ENABLED=true
+GEMINI_API_KEY=발급받은_API_키
+STUDY_GEMINI_MODEL=gemini-flash-latest
+```
+
+클라우드는 Google GenAI 공식 Python SDK와 JSON 스키마 출력을 사용합니다. 자동 전환 시 로컬 대기 제한은 기본 15초, Gemini는 60초입니다. 느린 로컬 모델은 대기 제한을 늘려 불필요한 전환을 줄이세요. 로컬 모델 미설정도 전환 대상이며, 로컬 성공 시 Gemini 키 확인과 호출을 건너뜁니다. 응답의 `data.engine`에서 실제 제공사·모델·전환 여부를 확인합니다.
+
 ## API 설명과 공통 오류
 
 Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를 펼치면 한국어 기능 설명, 입력 조건, 응답 필드와 오류 코드별 예시를 확인할 수 있습니다. 내부 메서드는 함수 본문 첫 줄의 짧은 docstring으로 역할을 표시합니다.
@@ -75,7 +96,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 
 ## 설정과 DB
 
-`.env`가 없어도 기본값으로 실행됩니다. 설정을 변경하려면 `.env.example`을 `.env`로 복사합니다.
+`.env`가 없어도 기본값으로 실행됩니다. 설정을 변경하려면 프로젝트 루트에 `.env`를 만들고 아래 설정값을 입력합니다.
 
 | 설정 | 기본값 | 의미 |
 | --- | --- | --- |
@@ -83,8 +104,18 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `STUDY_DATABASE_PATH` | `study.db` | SQLite 파일 경로 |
 | `STUDY_WEATHER_TIMEOUT_SECONDS` | `10` | 외부 날씨 API 제한 시간(0.1~30초) |
 | `STUDY_WEATHER_CACHE_TTL_SECONDS` | `600` | 날씨 캐시 유지 시간(0~3600초, 0은 캐시 해제) |
+| `STUDY_LLM_BASE_URL` | `http://127.0.0.1:11434` | Ollama 서버의 기본 주소 |
+| `STUDY_LLM_MODEL` | 빈 문자열 | 직접 준비한 로컬 모델명 |
+| `STUDY_LLM_TIMEOUT_SECONDS` | `180` | 추론 응답 대기 시간(1~600초) |
+| `STUDY_LLM_CONTEXT_SIZE` | `16384` | 요청 문맥 길이(2048~131072 정수). 모델·메모리에 맞춰 조절 |
+| `STUDY_LLM_CLOUD_FALLBACK_ENABLED` | `false` | `true`일 때 로컬 실패 후 Gemini 한 번 호출 |
+| `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS` | `15` | 자동 전환 모드의 로컬 응답 대기 제한(1~600초). 기존 제한보다 늘리지는 않음 |
+| `GEMINI_API_KEY` | 빈 문자열 | Gemini API 키. 클라우드 전환 시 필요 |
+| `STUDY_GEMINI_MODEL` | 빈 문자열 | JSON 스키마 출력을 지원하는 Gemini 모델명. 예: `gemini-flash-latest` |
+| `STUDY_GEMINI_TIMEOUT_SECONDS` | `60` | Gemini 응답 대기 제한(1~300초) |
+| `STUDY_GEMINI_MAX_OUTPUT_TOKENS` | `8192` | Gemini 출력 토큰 상한(128~32768 정수). 모델에 따라 내부 추론도 한도에 포함될 수 있음 |
 
-실제 환경변수가 `.env` 값보다 우선합니다. 상대 DB 경로는 프로젝트 루트 기준입니다. 서버 시작 시 테이블이 없으면 생성하고, 사용자 데이터는 DB 파일에 저장합니다. DB 파일과 `.env`는 Git에서 제외합니다.
+설정 우선순위는 프로젝트 루트의 `.env` → 환경변수 → 코드 기본값입니다. `.env`에 작성한 값은 같은 이름의 환경변수보다 우선합니다. 파일 수정 후 서버를 재시작하면 반영됩니다. VS Code의 `python.terminal.useEnvFile`은 `false`로 두어도 코드가 직접 `.env`를 읽습니다. 상대 DB 경로는 프로젝트 루트 기준입니다. 서버 시작 시 테이블이 없으면 생성하고, 사용자 데이터는 DB 파일에 저장합니다. DB 파일과 `.env`는 Git에서 제외합니다.
 
 현재 추가 패키지 다운로드가 제한되어 Python 기본 `sqlite3` 드라이버를 사용합니다. `models.py`는 SQL 테이블 정의와 행 매핑을 담으며 SQLAlchemy ORM 모델은 아닙니다. ORM 도입 시 infrastructure의 모델·저장소·Unit of Work 및 common의 연결 설정을 교체하고 domain과 application의 계약을 유지할 수 있습니다. DB 테이블 구조 변경을 자동 반영하는 마이그레이션 도구는 아직 구성하지 않았습니다.
 
@@ -99,6 +130,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `backend/app/common/database.py` | DB 연결과 개발용 테이블 초기화 |
 | `backend/app/common/responses.py` | 모든 API의 공통 응답 형식 |
 | `backend/app/common/errors/` | 공통 오류 코드·응답 모델·예외 핸들러·Swagger 오류 문서 |
+| `backend/app/outfits/` | 날씨 기반 LLM 추천·Gemini 자동 전환·오늘/주간 조회·응답 검증 |
 | `backend/app/users/presentation/router.py` | HTTP 요청, Service 호출, 상태 코드·응답 반환 |
 | `backend/app/users/presentation/schemas.py` | Pydantic 요청·응답 형식 |
 | `backend/app/users/application/services.py` | 사용자 등록·조회 절차와 트랜잭션 범위 |
@@ -154,4 +186,4 @@ Swagger에서 `POST /api/v1/users`를 실행합니다.
 
 ## 다음 업무 추가
 
-옷차림 추천 기능을 추가한다면 `backend/app/outfits/` 아래 같은 4개 계층과 `bootstrap.py`를 배치하고 `backend/main.py`에서 라우터를 등록합니다. 공통 폴더에는 환경 설정·DB 연결처럼 여러 업무가 사용하는 기술 기반만 둡니다.
+새 업무는 `backend/app/` 아래 4개 계층과 `bootstrap.py`를 배치하고 `backend/main.py`에서 라우터를 등록합니다. 옷차림 추천의 외부 날씨 연결처럼 다른 업무의 구현을 사용하는 부분은 infrastructure에 둡니다. 공통 폴더에는 여러 업무가 사용하는 환경 설정·DB 연결·응답 형식을 둡니다.

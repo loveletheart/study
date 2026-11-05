@@ -22,6 +22,18 @@ class ErrorCode(str, Enum):
     WEATHER_TIMEOUT = "WEATHER_TIMEOUT"
     WEATHER_INVALID_RESPONSE = "WEATHER_INVALID_RESPONSE"
     WEATHER_RATE_LIMITED = "WEATHER_RATE_LIMITED"
+    OUTFIT_INVALID_FORECAST = "OUTFIT_INVALID_FORECAST"
+    OUTFIT_LLM_NOT_CONFIGURED = "OUTFIT_LLM_NOT_CONFIGURED"
+    OUTFIT_LLM_UNAVAILABLE = "OUTFIT_LLM_UNAVAILABLE"
+    OUTFIT_LLM_MODEL_NOT_FOUND = "OUTFIT_LLM_MODEL_NOT_FOUND"
+    OUTFIT_LLM_TIMEOUT = "OUTFIT_LLM_TIMEOUT"
+    OUTFIT_LLM_INVALID_RESPONSE = "OUTFIT_LLM_INVALID_RESPONSE"
+    OUTFIT_CLOUD_NOT_CONFIGURED = "OUTFIT_CLOUD_NOT_CONFIGURED"
+    OUTFIT_CLOUD_UNAVAILABLE = "OUTFIT_CLOUD_UNAVAILABLE"
+    OUTFIT_CLOUD_AUTH_ERROR = "OUTFIT_CLOUD_AUTH_ERROR"
+    OUTFIT_CLOUD_RATE_LIMITED = "OUTFIT_CLOUD_RATE_LIMITED"
+    OUTFIT_CLOUD_TIMEOUT = "OUTFIT_CLOUD_TIMEOUT"
+    OUTFIT_CLOUD_INVALID_RESPONSE = "OUTFIT_CLOUD_INVALID_RESPONSE"
 
 
 @dataclass(frozen=True)
@@ -49,4 +61,16 @@ ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
     ErrorCode.WEATHER_TIMEOUT: ErrorSpec(504, "날씨 제공 서비스의 응답 시간이 초과되었습니다."),
     ErrorCode.WEATHER_INVALID_RESPONSE: ErrorSpec(502, "날씨 제공 서비스의 응답 형식 또는 데이터가 올바르지 않습니다."),
     ErrorCode.WEATHER_RATE_LIMITED: ErrorSpec(503, "날씨 제공 서비스의 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요."),
+    ErrorCode.OUTFIT_INVALID_FORECAST: ErrorSpec(502, "옷차림 추천에 필요한 날씨 정보가 올바르지 않습니다."),
+    ErrorCode.OUTFIT_LLM_NOT_CONFIGURED: ErrorSpec(503, "STUDY_LLM_MODEL에 사용할 로컬 모델명을 설정해 주세요."),
+    ErrorCode.OUTFIT_LLM_UNAVAILABLE: ErrorSpec(503, "로컬 LLM 서버에 연결하거나 추천을 생성할 수 없습니다."),
+    ErrorCode.OUTFIT_LLM_MODEL_NOT_FOUND: ErrorSpec(503, "설정한 모델을 로컬 LLM 서버에서 찾을 수 없습니다."),
+    ErrorCode.OUTFIT_LLM_TIMEOUT: ErrorSpec(504, "로컬 LLM의 추천 생성 시간이 초과되었습니다."),
+    ErrorCode.OUTFIT_LLM_INVALID_RESPONSE: ErrorSpec(502, "로컬 LLM이 올바른 옷차림 응답을 생성하지 못했습니다."),
+    ErrorCode.OUTFIT_CLOUD_NOT_CONFIGURED: ErrorSpec(503, "Gemini API 키와 사용할 API 모델명을 설정해 주세요."),
+    ErrorCode.OUTFIT_CLOUD_UNAVAILABLE: ErrorSpec(503, "클라우드 LLM 연결과 API 모델 설정을 확인해 주세요."),
+    ErrorCode.OUTFIT_CLOUD_AUTH_ERROR: ErrorSpec(503, "Gemini API 키 또는 접근 권한을 확인해 주세요."),
+    ErrorCode.OUTFIT_CLOUD_RATE_LIMITED: ErrorSpec(503, "Gemini API 요청 한도 또는 사용 가능 크레딧을 확인해 주세요."),
+    ErrorCode.OUTFIT_CLOUD_TIMEOUT: ErrorSpec(504, "클라우드 LLM의 추천 생성 시간이 초과되었습니다."),
+    ErrorCode.OUTFIT_CLOUD_INVALID_RESPONSE: ErrorSpec(502, "클라우드 LLM이 올바른 옷차림 응답을 생성하지 못했습니다."),
 })
