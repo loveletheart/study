@@ -37,6 +37,8 @@ class NeighborhoodOutfitService:
         """주간 추천에 개인 조건을 적용하고 준비 의류도 함께 다시 구성"""
         location = self._locations.get(location_id)
         region = self._regions.resolve(location)
+        if preferences != OutfitPreferences():
+            self._personalized.register(int(region.code), "weekly", preferences)
         base = self._cache.get_region_weekly(int(region.code), region.latitude, region.longitude)
         if preferences == OutfitPreferences():
             return NeighborhoodResult(location, base, preferences, (), region=region)

@@ -34,6 +34,10 @@ class OutfitPersonalizer(Protocol):
 
 
 class PersonalizedOutfitCache(Protocol):
+    def register(self, location_id: int, kind: str, preferences: OutfitPreferences) -> str:
+        """결과가 아직 없는 조건도 다음 배치 대상으로 등록"""
+        ...
+
     def get(
         self, location_id: int, kind: str, base: TodayOutfitResult | WeeklyOutfitResult,
         preferences: OutfitPreferences,

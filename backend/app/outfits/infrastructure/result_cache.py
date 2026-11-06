@@ -6,13 +6,14 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from threading import Event, Lock, Thread
+from time import perf_counter
 from weakref import WeakValueDictionary
 
 from pydantic import TypeAdapter, ValidationError
 
 from app.common.database import connect_database
 from app.outfits.application.dto import TodayOutfitResult, WeeklyOutfitResult
-from app.outfits.application.exceptions import OutfitForecastError
+from app.outfits.application.exceptions import OutfitForecastError, WeeklyOutfitNotReadyError
 from app.outfits.application.services.outfit_service import OutfitService
 from app.weather.domain.models import KST
 
@@ -40,6 +41,7 @@ class CachedOutfitService:
         refresh_seconds: float = 3600, clock: Callable[[], datetime] | None = None,
         reuse_unchanged_weather: bool = False,
         max_entries: int = 128,
+        weekly_batch_only: bool = False, weekly_batch_hour: int = 1, weekly_max_age_seconds: float = 172800,
     ) -> None:
         """저장 경로와 갱신 주기를 설정한다."""
         self._database_path = database_path
@@ -48,6 +50,9 @@ class CachedOutfitService:
         self._refresh_seconds = refresh_seconds
         self._reuse_unchanged_weather = reuse_unchanged_weather
         self._max_entries = max_entries
+        self._weekly_batch_only = weekly_batch_only
+        self._weekly_batch_hour = weekly_batch_hour
+        self._weekly_max_age_seconds = weekly_max_age_seconds
         self._clock = clock or (lambda: datetime.now(KST))
         self._generation_locks = WeakValueDictionary()
         self._generation_locks_guard = Lock()
@@ -64,6 +69,11 @@ class CachedOutfitService:
                 )
             if "prepared_for" not in columns:
                 connection.execute("ALTER TABLE outfit_result_cache ADD COLUMN prepared_for REAL NOT NULL DEFAULT 0")
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS outfit_weekly_batch_runs "
+                "(scope TEXT NOT NULL, run_date TEXT NOT NULL, started_at REAL NOT NULL, finished_at REAL, "
+                "status TEXT NOT NULL, PRIMARY KEY(scope, run_date))",
+            )
 
     def get_today(self, latitude: float, longitude: float) -> TodayOutfitResult:
         """오늘 추천을 재사용하고 저장된 결과가 없을 때만 생성한다."""
@@ -111,6 +121,8 @@ class CachedOutfitService:
         cached = self._read(key)
         if cached is not None:
             return cached
+        if self._weekly_batch_only and kind.rsplit(":", 1)[-1] == "weekly":
+            raise WeeklyOutfitNotReadyError()
         with self._lock_for(key):
             cached = self._read(key)
             if cached is not None:
@@ -127,13 +139,15 @@ class CachedOutfitService:
         if row is None or row["payload"] is None:
             return None
         now = self._clock().astimezone(KST)
-        if not 0 <= now.timestamp() - row["updated_at"] <= self._refresh_seconds * 3:
+        is_weekly_batch = self._weekly_batch_only and key[1].rsplit(":", 1)[-1] == "weekly"
+        max_age = self._weekly_max_age_seconds if is_weekly_batch else self._refresh_seconds * 3
+        if not 0 <= now.timestamp() - row["updated_at"] <= max_age:
             return None
         try:
             result = RESULT_ADAPTERS[key[1].rsplit(":", 1)[-1]].validate_json(row["payload"])
         except ValidationError:
             return None
-        if result.forecast.today != now.date():
+        if not is_weekly_batch and result.forecast.today != now.date():
             return None
         return result
 
@@ -168,6 +182,8 @@ class CachedOutfitService:
         """공통 갱신 기한 전 새 날씨와 기본 버전을 준비하되 정규 갱신 주기는 유지"""
         if kind not in RESULT_ADAPTERS:
             raise ValueError("Unknown outfit kind")
+        if self._weekly_batch_only and kind == "weekly":
+            return None
         key = self._key(f"region:{location_id}:{kind}", latitude, longitude)
         with self._lock_for(key):
             with closing(connect_database(self._database_path)) as connection:
@@ -208,6 +224,8 @@ class CachedOutfitService:
         for row in rows:
             if stopped is not None and stopped.is_set():
                 return
+            if self._weekly_batch_only and row["kind"].rsplit(":", 1)[-1] == "weekly":
+                continue
             key = self._key(row["kind"], row["latitude"], row["longitude"])
             with self._lock_for(key):
                 if stopped is not None and stopped.is_set():
@@ -236,6 +254,88 @@ class CachedOutfitService:
                     self._generate(key)
                 except Exception as exc:
                     logger.warning("옷차림 사전 갱신 실패: kind=%s, cause=%s", row["kind"], type(exc).__name__)
+
+    def run_weekly_batch(self, stopped: Event | None = None, on_ready=None, force: bool = False) -> dict:
+        """한국 시간 지정된 한 시간 안에 하루 한 번 시작하고 요청 경로와 분리해 주간 생성"""
+        now = self._clock().astimezone(KST)
+        if not force and now.hour != self._weekly_batch_hour:
+            return {"status": "not_due", "generated": 0, "failed": 0}
+        run_date = now.date().isoformat()
+        with closing(connect_database(self._database_path)) as connection, connection:
+            claimed = connection.execute(
+                "INSERT OR IGNORE INTO outfit_weekly_batch_runs (scope, run_date, started_at, status) VALUES (?, ?, ?, 'running')",
+                (self._scope, run_date, now.timestamp()),
+            ).rowcount
+        if not claimed:
+            return {"status": "already_run", "generated": 0, "failed": 0}
+        started = perf_counter()
+        logger.info("주간 추천 배치 시작: run_date=%s", run_date)
+        generated, failed, personalized_generated = 0, 0, 0
+        status = "completed"
+        try:
+            with closing(connect_database(self._database_path)) as connection:
+                rows = connection.execute(
+                    "SELECT kind, latitude, longitude, requested_at FROM outfit_result_cache "
+                    "WHERE scope=? AND requested_at>=? ORDER BY requested_at DESC",
+                    (self._scope, now.timestamp() - 86400),
+                ).fetchall()
+            targets = {}
+            for row in rows:
+                prefix = row["kind"].rsplit(":", 1)
+                kind = prefix[0] + ":weekly" if len(prefix) == 2 else "weekly"
+                key = self._key(kind, row["latitude"], row["longitude"])
+                targets.setdefault(key, row["requested_at"])
+            for key, requested_at in targets.items():
+                if stopped is not None and stopped.is_set():
+                    status = "stopped"
+                    break
+                try:
+                    with self._lock_for(key):
+                        with closing(connect_database(self._database_path)) as connection, connection:
+                            connection.execute(
+                                "INSERT INTO outfit_result_cache (scope, kind, latitude, longitude, requested_at) "
+                                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(scope, kind, latitude, longitude) "
+                                "DO UPDATE SET requested_at=MAX(requested_at, excluded.requested_at)", (*key, requested_at),
+                            )
+                            connection.execute(
+                                "DELETE FROM outfit_result_cache WHERE rowid NOT IN "
+                                "(SELECT rowid FROM outfit_result_cache ORDER BY requested_at DESC, rowid DESC LIMIT ?)",
+                                (self._max_entries,),
+                            )
+                            present = connection.execute(
+                                "SELECT 1 FROM outfit_result_cache WHERE scope=? AND kind=? AND latitude=? AND longitude=?", key,
+                            ).fetchone()
+                        if present is None:
+                            continue
+                        result = self._generate(key)
+                    generated += 1
+                    if on_ready is not None:
+                        personal = on_ready(key, result, stopped)
+                        if personal:
+                            failed += personal["failed"]
+                            personalized_generated += personal["generated"]
+                except Exception as exc:
+                    failed += 1
+                    logger.warning("주간 배치 항목 실패: kind=%s, cause=%s", key[1], type(exc).__name__)
+        except Exception:
+            status = "failed"
+            raise
+        finally:
+            if failed and status == "completed":
+                status = "partial_failure"
+            with closing(connect_database(self._database_path)) as connection, connection:
+                connection.execute(
+                    "UPDATE outfit_weekly_batch_runs SET status=?, finished_at=? WHERE scope=? AND run_date=?",
+                    (status, self._clock().timestamp(), self._scope, run_date),
+                )
+            logger.info(
+                "주간 추천 배치 종료: status=%s, common=%s, personal=%s, failed=%s, elapsed_seconds=%.2f",
+                status, generated, personalized_generated, failed, perf_counter() - started,
+            )
+        return {
+            "status": status, "generated": generated, "personalized_generated": personalized_generated,
+            "failed": failed, "elapsed_seconds": perf_counter() - started,
+        }
 
 
 class OutfitRefreshWorker:

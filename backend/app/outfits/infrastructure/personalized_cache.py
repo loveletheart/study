@@ -16,7 +16,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from app.common.database import connect_database
 from app.outfits.application.dto import GeneratedOutfits, PersonalizedOutfits, TodayOutfitResult, WeeklyOutfitResult
-from app.outfits.application.exceptions import OutfitLlmResponseError
+from app.outfits.application.exceptions import OutfitLlmResponseError, WeeklyOutfitNotReadyError
 from app.outfits.application.ports import OutfitPersonalizer
 from app.outfits.domain.preferences import OutfitPreferences
 from app.outfits.infrastructure.result_cache import CachedOutfitService, RESULT_ADAPTERS
@@ -33,6 +33,7 @@ class SQLitePersonalizedOutfitCache:
         self, database_path: Path, scope: str, personalizer: OutfitPersonalizer,
         common: CachedOutfitService, locations: LocationCatalog, lead_seconds: float = 600,
         clock: Callable[[], datetime] | None = None, max_entries: int = 4096,
+        weekly_batch_only: bool = False,
     ) -> None:
         """조건 조합을 저장하고 사용자 식별자 없이 같은 조건의 결과를 공유"""
         self._database_path = database_path
@@ -43,6 +44,7 @@ class SQLitePersonalizedOutfitCache:
         self._lead_seconds = lead_seconds
         self._clock = clock or (lambda: datetime.now(KST))
         self._max_entries = max_entries
+        self._weekly_batch_only = weekly_batch_only
         self._locks = WeakValueDictionary()
         self._guard = Lock()
         with closing(connect_database(database_path)) as connection, connection:
@@ -65,25 +67,38 @@ class SQLitePersonalizedOutfitCache:
                 self._locks[key] = generation_lock
             return generation_lock
 
+    def _profile_key(self, location_id: int, kind: str, preferences: OutfitPreferences) -> str:
+        """기본 버전과 별개로 다음 배치에 사용할 조건 조합 식별"""
+        profile = json.dumps([self._scope, location_id, kind, asdict(preferences)], sort_keys=True)
+        return hashlib.sha256(profile.encode()).hexdigest()
+
+    def register(self, location_id: int, kind: str, preferences: OutfitPreferences) -> str:
+        """기본 결과가 아직 없는 주간 개인 조건도 다음 야간 배치를 위해 등록"""
+        if kind not in RESULT_ADAPTERS:
+            raise ValueError("Unknown outfit kind")
+        profile_key = self._profile_key(location_id, kind, preferences)
+        with closing(connect_database(self._database_path)) as connection, connection:
+            connection.execute(
+                "INSERT INTO outfit_personal_targets (profile_key, scope, location_id, kind, preferences, requested_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(profile_key) DO UPDATE SET requested_at=excluded.requested_at",
+                (profile_key, self._scope, location_id, kind, PREFERENCES_ADAPTER.dump_json(preferences), self._clock().timestamp()),
+            )
+            connection.execute(
+                "DELETE FROM outfit_personal_targets WHERE profile_key NOT IN "
+                "(SELECT profile_key FROM outfit_personal_targets ORDER BY requested_at DESC, profile_key LIMIT ?)",
+                (self._max_entries,),
+            )
+        return profile_key
+
     def get(
         self, location_id: int, kind: str, base: TodayOutfitResult | WeeklyOutfitResult,
-        preferences: OutfitPreferences, register: bool = True,
+        preferences: OutfitPreferences, register: bool = True, from_weekly_batch: bool = False,
     ) -> tuple[PersonalizedOutfits, bool]:
-        """기본 버전과 개인 조건이 같은 결과만 재사용하고 최초 조합은 동적 생성"""
-        profile = json.dumps([self._scope, location_id, kind, asdict(preferences)], sort_keys=True)
-        profile_key = hashlib.sha256(profile.encode()).hexdigest()
+        """주간은 준비된 개인 결과만 제공하고 오늘의 최초 조합은 동적 생성"""
         if register:
-            with closing(connect_database(self._database_path)) as connection, connection:
-                connection.execute(
-                    "INSERT INTO outfit_personal_targets (profile_key, scope, location_id, kind, preferences, requested_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(profile_key) DO UPDATE SET requested_at=excluded.requested_at",
-                    (profile_key, self._scope, location_id, kind, PREFERENCES_ADAPTER.dump_json(preferences), self._clock().timestamp()),
-                )
-                connection.execute(
-                    "DELETE FROM outfit_personal_targets WHERE profile_key NOT IN "
-                    "(SELECT profile_key FROM outfit_personal_targets ORDER BY requested_at DESC, profile_key LIMIT ?)",
-                    (self._max_entries,),
-                )
+            profile_key = self.register(location_id, kind, preferences)
+        else:
+            profile_key = self._profile_key(location_id, kind, preferences)
         base_version = base.base_version or hashlib.sha256(RESULT_ADAPTERS[kind].dump_json(base)).hexdigest()
         cache_key = hashlib.sha256((profile_key + base_version).encode()).hexdigest()
         with self._lock_for(cache_key):
@@ -96,6 +111,8 @@ class SQLitePersonalizedOutfitCache:
                         return cached, True
                 except ValidationError:
                     pass
+            if self._weekly_batch_only and kind == "weekly" and not from_weekly_batch:
+                raise WeeklyOutfitNotReadyError()
             recommendations = (base.recommendation,) if kind == "today" else base.daily
             generated = self._personalizer.personalize(GeneratedOutfits(recommendations, base.engine), preferences)
             if tuple(item.weather for item in generated.recommendations) != tuple(item.weather for item in recommendations):
@@ -124,6 +141,8 @@ class SQLitePersonalizedOutfitCache:
         for target in targets:
             if stopped is not None and stopped.is_set():
                 return
+            if self._weekly_batch_only and target["kind"] == "weekly":
+                continue
             try:
                 location = self._locations.get(target["location_id"])
                 prepared = self._common.prepare_region(
@@ -144,3 +163,30 @@ class SQLitePersonalizedOutfitCache:
                 )
             except Exception as exc:
                 logger.warning("개인 맞춤 사전 생성 실패: kind=%s, cause=%s", target["kind"], type(exc).__name__)
+
+    def prepare_weekly(self, key: tuple, base: WeeklyOutfitResult, stopped=None) -> dict:
+        """주간 기본 결과가 준비된 지역부터 등록된 개인 조건을 같은 야간 작업에서 생성"""
+        parts = key[1].split(":")
+        if len(parts) != 3 or parts[0] != "region":
+            return {"generated": 0, "failed": 0}
+        region_id = int(parts[1])
+        with closing(connect_database(self._database_path)) as connection:
+            targets = connection.execute(
+                "SELECT preferences FROM outfit_personal_targets "
+                "WHERE scope=? AND location_id=? AND kind='weekly' AND requested_at>=? ORDER BY requested_at DESC",
+                (self._scope, region_id, self._clock().timestamp() - 86400),
+            ).fetchall()
+        generated, failed = 0, 0
+        for target in targets:
+            if stopped is not None and stopped.is_set():
+                break
+            try:
+                self.get(
+                    region_id, "weekly", base, PREFERENCES_ADAPTER.validate_json(target["preferences"]),
+                    register=False, from_weekly_batch=True,
+                )
+                generated += 1
+            except Exception as exc:
+                failed += 1
+                logger.warning("주간 개인 맞춤 배치 실패: cause=%s", type(exc).__name__)
+        return {"generated": generated, "failed": failed}

@@ -15,9 +15,10 @@ def build_weekly_wardrobe(recommendations: tuple[OutfitRecommendation, ...]) -> 
     """날짜별 추천에서 중복 없는 주간 준비 의류 구성"""
     looks = tuple(recommendation.best for recommendation in recommendations)
     return WeeklyWardrobe(
-        tops=tuple(dict.fromkeys(look.top for look in looks)),
-        bottoms=tuple(dict.fromkeys(look.bottom for look in looks)),
+        tops=tuple(dict.fromkeys(look.top for look in looks if look.top is not None)),
+        bottoms=tuple(dict.fromkeys(look.bottom for look in looks if look.bottom is not None)),
         outerwear=tuple(dict.fromkeys(look.outerwear for look in looks if look.outerwear is not None)),
         shoes=tuple(dict.fromkeys(look.shoes for look in looks)),
         accessories=tuple(dict.fromkeys(item for look in looks for item in look.accessories)),
+        one_pieces=tuple(dict.fromkeys(look.one_piece for look in looks if look.one_piece is not None)),
     )

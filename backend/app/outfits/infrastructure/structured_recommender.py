@@ -14,7 +14,10 @@ from app.outfits.infrastructure.prompts import PROMPT_VERSION, build_messages
 
 def _look(value: GeneratedLook) -> OutfitLook:
     """검증한 모델의 의류 구성을 도메인 객체로 변환"""
-    return OutfitLook(value.top, value.bottom, value.outerwear, value.shoes, tuple(dict.fromkeys(value.accessories)))
+    return OutfitLook(
+        value.top, value.bottom, value.outerwear, value.shoes, tuple(dict.fromkeys(value.accessories)),
+        outfit_type=value.outfit_type, one_piece=value.one_piece,
+    )
 
 
 class StructuredChatClient(Protocol):
@@ -55,7 +58,8 @@ class StructuredOutfitRecommender:
         for weather, day in zip(days, generated.days):
             best, worst = _look(day.best), _look(day.worst)
             if (
-                (best.top, best.bottom, best.outerwear, best.shoes) == (worst.top, worst.bottom, worst.outerwear, worst.shoes)
+                (best.outfit_type, best.top, best.bottom, best.one_piece, best.outerwear, best.shoes)
+                == (worst.outfit_type, worst.top, worst.bottom, worst.one_piece, worst.outerwear, worst.shoes)
                 and set(best.accessories) == set(worst.accessories)
             ):
                 raise self._response_error()

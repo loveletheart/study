@@ -41,7 +41,7 @@ def get_today(
 @router.get(
     "/{location_id}/weekly", response_model=ApiResponse[NeighborhoodWeeklyResponse],
     summary="동네 공통 주간 추천과 개인화", operation_id="get_neighborhood_weekly_outfits",
-    description="지역별 주간 추천을 공유하고 개인 조건에 따라 추천과 준비 의류를 함께 조정합니다.",
+    description="매일 새벽 배치에서 생성한 시군구 공통·개인 주간 결과를 조회합니다. 새 조건은 다음 배치 대상으로 등록하고 준비 전에는 OUTFIT_WEEKLY_NOT_READY를 반환합니다.",
 )
 def get_weekly(
     location_id: LocationId, service: NeighborhoodDependency, preferences: PreferencesDependency,

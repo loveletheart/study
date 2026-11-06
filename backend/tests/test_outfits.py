@@ -42,8 +42,8 @@ def generated_content(dates: list[str], outerwear: str | None = "재킷") -> str
     """테스트에서만 사용하는 합성 LLM 응답 생성"""
     return json.dumps({"days": [{
         "date": day,
-        "best": {"top": "블루 셔츠", "bottom": "면바지", "outerwear": outerwear, "shoes": "생활방수 운동화", "accessories": ["우산"]},
-        "worst": {"top": "민소매", "bottom": "반바지", "outerwear": None, "shoes": "슬리퍼", "accessories": []},
+        "best": {"outfit_type": "separates", "one_piece": None, "top": "블루 셔츠", "bottom": "면바지", "outerwear": outerwear, "shoes": "생활방수 운동화", "accessories": ["우산"]},
+        "worst": {"outfit_type": "separates", "one_piece": None, "top": "민소매", "bottom": "반바지", "outerwear": None, "shoes": "슬리퍼", "accessories": []},
         "reasons": ["아침의 낮은 기온과 강수 가능성을 함께 고려한 구성입니다."],
         "avoid_reasons": ["얇은 옷만 입으면 아침·저녁에 추울 수 있습니다."],
         "precautions": ["외출 전 최신 예보를 확인하세요."],

@@ -285,6 +285,7 @@ class OutfitCacheTests(unittest.TestCase):
             patch("main.initialize_database"),
             patch("main.get_cached_outfit_service", return_value=self.cache),
             patch("main.get_personalized_outfit_cache"),
+            patch("main.get_weekly_outfit_batch"),
             patch("main.OutfitRefreshWorker") as worker,
         ):
             with TestClient(app) as client:
@@ -294,8 +295,8 @@ class OutfitCacheTests(unittest.TestCase):
                     second = client.get(url)
                     self.assertEqual(first.status_code, 200)
                     self.assertEqual(first.json(), second.json())
-                self.assertEqual(worker.return_value.start.call_count, 2)
-            self.assertEqual(worker.return_value.stop.call_count, 2)
+                self.assertEqual(worker.return_value.start.call_count, 3)
+            self.assertEqual(worker.return_value.stop.call_count, 3)
         self.assertEqual(self.factory.call_count, 2)
 
 

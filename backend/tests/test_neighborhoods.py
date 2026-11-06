@@ -71,7 +71,7 @@ class NeighborhoodTests(unittest.TestCase):
 
         self.personal_llm.chat.side_effect = personal_content
         self.personalizer = LlmOutfitPersonalizer(lambda base, preferences: StructuredOutfitRecommender(
-            PersonalizationChatClient(self.personal_llm, base, preferences), "test-personal-model", "ollama",
+            PersonalizationChatClient(self.personal_llm, preferences), "test-personal-model", "ollama",
         ))
         self.personal_cache = SQLitePersonalizedOutfitCache(
             self.database_path, "personal-test", self.personalizer, self.cache, self.regions,
@@ -257,8 +257,32 @@ class NeighborhoodTests(unittest.TestCase):
         self.assertIn("생성 문장", personal.result.recommendation.reasons[0])
         request = json.loads(self.personal_llm.chat.call_args.args[1][1]["content"])
         self.assertEqual(request["preferences"]["style"], "formal")
-        self.assertTrue(request["shared_recommendations"])
-        self.assertEqual(personal.personalization.generated.engine.prompt_version, "2.0")
+        self.assertIn("격식", request["personal_requirements"]["스타일"])
+        self.assertEqual(request["output_schema"], self.personal_llm.chat.call_args.args[2])
+        self.assertEqual(len(request["look_examples"]), 2)
+        self.assertNotIn("shared_recommendations", request)
+        self.assertEqual(personal.personalization.generated.engine.prompt_version, "2.3")
+
+    def test_explicit_personal_conditions_have_distinct_meanings_without_changing_weather(self):
+        """각 선택값의 의미를 명시하면서 원본 날씨와 출력 계약을 유지한다."""
+        weather_inputs = []
+        cases = [
+            (OutfitPreferences(ColdSensitivity.COLD, OutfitStyle.FORMAL, Activity.OUTDOOR),
+             ("추위를 많이", "격식", "야외")),
+            (OutfitPreferences(ColdSensitivity.WARM, OutfitStyle.CASUAL, Activity.ACTIVE),
+             ("더위를 많이", "캐주얼", "활발히")),
+        ]
+        for preferences, meanings in cases:
+            with self.subTest(preferences=preferences):
+                self.service.get_today(1001, preferences)
+                _, messages, schema = self.personal_llm.chat.call_args.args
+                request = json.loads(messages[1]["content"])
+                requirements = request["personal_requirements"]
+                for key, meaning in zip(("체온_성향", "스타일", "활동"), meanings):
+                    self.assertIn(meaning, requirements[key])
+                self.assertEqual(schema["properties"]["days"]["maxItems"], 1)
+                weather_inputs.append(request["weather_days"])
+        self.assertEqual(weather_inputs[0], weather_inputs[1])
 
     def test_personal_generation_is_reused_and_invalidated_when_base_changes(self):
         preferences = OutfitPreferences(style=OutfitStyle.FORMAL)

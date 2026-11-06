@@ -13,18 +13,34 @@ MAX_RESPONSE_BYTES = 1_048_576
 
 
 class OllamaClient:
-    def __init__(self, base_url: str, timeout_seconds: float, context_size: int) -> None:
+    def __init__(
+        self, base_url: str, timeout_seconds: float, context_size: int,
+        today_context_size: int | None = None, thinking: bool | None = None,
+        *, temperature: float = 0.3, top_p: float | None = None, min_p: float | None = None,
+    ) -> None:
         """로컬 서버 주소와 추론 제한 설정"""
         self._url = base_url.rstrip("/") + "/api/chat"
         self._timeout_seconds = timeout_seconds
         self._context_size = context_size
+        self._today_context_size = today_context_size
+        self._thinking = thinking
+        self._sampling = {"temperature": temperature}
+        if top_p is not None:
+            self._sampling["top_p"] = top_p
+        if min_p is not None:
+            self._sampling["min_p"] = min_p
 
     def chat(self, model: str, messages: list[dict[str, str]], schema: dict) -> str:
         """JSON 스키마를 지정해 단일 비스트리밍 응답 조회"""
+        is_today = schema.get("properties", {}).get("days", {}).get("maxItems") == 1
+        context_size = self._today_context_size if is_today and self._today_context_size is not None else self._context_size
+        max_output = min(8192, context_size // 2) if is_today and self._today_context_size is not None else 8192
         payload = {
             "model": model, "messages": messages, "format": schema, "stream": False,
-            "options": {"temperature": 0.3, "num_predict": 8192, "num_ctx": self._context_size},
+            "options": {**self._sampling, "num_predict": max_output, "num_ctx": context_size},
         }
+        if self._thinking is not None:
+            payload["think"] = self._thinking
         request = Request(
             self._url, data=json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8"),
             headers={"Content-Type": "application/json", "Accept": "application/json"}, method="POST",

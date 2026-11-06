@@ -18,14 +18,25 @@ from app.outfits.infrastructure.prompts import PROMPT_VERSION
 from app.outfits.infrastructure.result_cache import CachedOutfitService
 from app.outfits.infrastructure.llm_personalizer import LlmOutfitPersonalizer, PersonalizationChatClient, PERSONALIZATION_VERSION
 from app.outfits.infrastructure.personalized_cache import SQLitePersonalizedOutfitCache
+from app.outfits.infrastructure.weekly_batch import WeeklyOutfitBatch
 from app.outfits.infrastructure.structured_recommender import StructuredOutfitRecommender
 from app.outfits.domain.preferences import OutfitPreferences
 from app.weather.bootstrap import get_location_catalog, get_sigungu_resolver, get_weather_service
 
 
+def _sampling_options(settings: Settings) -> dict:
+    """생성 클라이언트와 캐시가 같은 샘플링 설정을 사용한다."""
+    return {"temperature": settings.llm_temperature, "top_p": settings.llm_top_p, "min_p": settings.llm_min_p}
+
+
 def _local_recommender(settings: Settings, timeout_seconds: float) -> OutfitRecommender:
     """로컬 추천 클라이언트 구성"""
-    client = OllamaClient(settings.llm_base_url, timeout_seconds, settings.llm_context_size)
+    client = OllamaClient(
+        settings.llm_base_url, timeout_seconds, settings.llm_context_size,
+        today_context_size=settings.llm_today_context_size,
+        thinking=settings.llm_thinking,
+        **_sampling_options(settings),
+    )
     return OllamaOutfitRecommender(client, settings.llm_model)
 
 
@@ -57,13 +68,18 @@ def get_cached_outfit_service() -> CachedOutfitService:
     signature = json.dumps([
         "outfit-cache-v2-sigungu", PROMPT_VERSION, settings.llm_base_url, settings.llm_model,
         settings.llm_context_size, settings.cloud_fallback_enabled, settings.gemini_model,
+        settings.llm_today_context_size,
+        settings.llm_thinking,
         settings.gemini_max_output_tokens,
+        _sampling_options(settings),
     ])
     scope = hashlib.sha256(signature.encode()).hexdigest()
     return CachedOutfitService(
         settings.database_path, scope, get_outfit_service, settings.outfit_refresh_seconds,
         reuse_unchanged_weather=True,
         max_entries=settings.outfit_cache_max_entries,
+        weekly_batch_only=True, weekly_batch_hour=settings.outfit_weekly_batch_hour,
+        weekly_max_age_seconds=settings.outfit_weekly_max_age_seconds,
     )
 
 
@@ -82,13 +98,18 @@ def _personal_recommender(base: GeneratedOutfits, preferences: OutfitPreferences
         timeout = settings.llm_timeout_seconds
         if settings.cloud_fallback_enabled and settings.fallback_local_timeout_seconds is not None:
             timeout = min(timeout, settings.fallback_local_timeout_seconds)
-        client = OllamaClient(settings.llm_base_url, timeout, settings.llm_context_size)
-        return StructuredOutfitRecommender(PersonalizationChatClient(client, base, preferences), settings.llm_model, "ollama")
+        client = OllamaClient(
+            settings.llm_base_url, timeout, settings.llm_context_size,
+            today_context_size=settings.llm_today_context_size,
+            thinking=settings.llm_thinking,
+            **_sampling_options(settings),
+        )
+        return StructuredOutfitRecommender(PersonalizationChatClient(client, preferences), settings.llm_model, "ollama")
 
     def cloud() -> OutfitRecommender:
         client = GeminiClient(settings.gemini_api_key, settings.gemini_timeout_seconds, settings.gemini_max_output_tokens)
         return StructuredOutfitRecommender(
-            PersonalizationChatClient(client, base, preferences), settings.gemini_model, "gemini",
+            PersonalizationChatClient(client, preferences), settings.gemini_model, "gemini",
             OutfitCloudResponseError, OutfitCloudNotConfiguredError,
         )
 
@@ -102,9 +123,18 @@ def get_personalized_outfit_cache() -> SQLitePersonalizedOutfitCache:
     scope = hashlib.sha256(json.dumps([
         PERSONALIZATION_VERSION, PROMPT_VERSION, settings.llm_base_url, settings.llm_model,
         settings.llm_context_size, settings.cloud_fallback_enabled, settings.gemini_model,
+        settings.llm_today_context_size,
+        settings.llm_thinking,
         settings.gemini_max_output_tokens,
+        _sampling_options(settings),
     ]).encode()).hexdigest()
     return SQLitePersonalizedOutfitCache(
         settings.database_path, scope, LlmOutfitPersonalizer(_personal_recommender),
         get_cached_outfit_service(), get_sigungu_resolver(), max_entries=settings.outfit_cache_max_entries,
+        weekly_batch_only=True,
     )
+
+
+def get_weekly_outfit_batch() -> WeeklyOutfitBatch:
+    """주간 전용 일일 배치 구성"""
+    return WeeklyOutfitBatch(get_cached_outfit_service(), get_personalized_outfit_cache())

@@ -3,7 +3,7 @@ from datetime import date as Date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.outfits.application.dto import OutfitForecast, TodayOutfitResult, WeeklyOutfitResult
-from app.outfits.domain.models import TemperatureBasis
+from app.outfits.domain.models import OutfitType, TemperatureBasis
 
 
 class AttributeResponse(BaseModel):
@@ -33,8 +33,10 @@ class OutfitWeatherResponse(AttributeResponse):
 
 
 class OutfitLookResponse(AttributeResponse):
-    top: str = Field(description="상의 구성")
-    bottom: str = Field(description="하의 구성")
+    outfit_type: OutfitType = Field(description="separates는 상하의 조합, one_piece는 원피스·점프수트")
+    top: str | None = Field(description="상의 구성. 원피스 구성이면 null")
+    bottom: str | None = Field(description="하의 구성. 원피스 구성이면 null")
+    one_piece: str | None = Field(description="원피스·점프수트 구성. 상하의 조합이면 null")
     outerwear: str | None = Field(description="겉옷 구성. 필요 없으면 null")
     shoes: str = Field(description="신발 구성")
     accessories: list[str] = Field(description="장갑·우산 등 추가 준비물")
@@ -58,6 +60,7 @@ class WeeklyWardrobeResponse(AttributeResponse):
     outerwear: list[str] = Field(description="이번 7일에 필요한 겉옷 종류. 중복 제외")
     shoes: list[str] = Field(description="이번 7일에 필요한 신발 종류. 중복 제외")
     accessories: list[str] = Field(description="이번 7일에 필요한 추가 준비물. 중복 제외")
+    one_pieces: list[str] = Field(default_factory=list, description="이번 7일에 필요한 원피스·점프수트 종류. 중복 제외")
 
 
 class RecommendationEngineResponse(AttributeResponse):
@@ -101,7 +104,9 @@ class TodayOutfitResponse(OutfitMetadataResponse):
 
 
 class WeeklyOutfitResponse(OutfitMetadataResponse):
-    daily: list[OutfitRecommendationResponse] = Field(min_length=7, max_length=7, description="오늘부터 날짜순으로 정렬한 7일 추천")
+    forecast_start_date: Date = Field(description="최근 주간 배치가 사용한 예보의 첫 날짜. 현재 날짜와 다를 수 있음")
+    daily: list[OutfitRecommendationResponse] = Field(min_length=7, max_length=7, description="forecast_start_date부터 날짜순으로 정렬한 7일 추천")
+    notice: str = Field(default="최근 야간 배치 기준 7일 추천입니다. 생성 시각·예보 날짜를 확인하고 외출 전 최신 날씨를 참고하세요.")
     wardrobe: WeeklyWardrobeResponse = Field(description="날짜별 베스트 옷차림을 합친 주간 준비 의류")
     summary: str = Field(description="7일 예상 기온과 준비 안내")
 
@@ -112,4 +117,5 @@ class WeeklyOutfitResponse(OutfitMetadataResponse):
             **_metadata(result.forecast), "daily": result.daily,
             "wardrobe": result.wardrobe, "summary": result.summary, "engine": result.engine,
             "generated_at": result.generated_at, "base_version": result.base_version,
+            "forecast_start_date": result.forecast.today,
         })

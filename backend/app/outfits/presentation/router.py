@@ -11,6 +11,7 @@ from app.outfits.presentation.schemas import TodayOutfitResponse, WeeklyOutfitRe
 
 router = APIRouter(prefix="/outfits", tags=["outfits"], responses=error_responses(
     ErrorCode.OUTFIT_INVALID_FORECAST,
+    ErrorCode.OUTFIT_WEEKLY_NOT_READY,
     ErrorCode.OUTFIT_LLM_NOT_CONFIGURED,
     ErrorCode.OUTFIT_LLM_UNAVAILABLE,
     ErrorCode.OUTFIT_LLM_MODEL_NOT_FOUND,
@@ -49,7 +50,7 @@ def get_today(latitude: Latitude, longitude: Longitude, service: OutfitServiceDe
 @router.get(
     "/weekly", response_model=ApiResponse[WeeklyOutfitResponse],
     summary="7일 옷차림 추천", operation_id="get_weekly_outfits",
-    description="저장된 7일 추천을 제공하고 조회한 지역은 매시간 갱신합니다. 최초 조회는 생성 시간이 필요합니다. 자동 전환 설정 시 로컬 실패 후 Gemini를 사용합니다.",
+    description="매일 한국 시간 새벽 배치에서 준비한 7일 추천을 제공합니다. 조회 시 모델을 호출하지 않습니다. 준비 전에는 OUTFIT_WEEKLY_NOT_READY를 반환하며 forecast_start_date로 예보 기준 날짜를 확인합니다.",
     response_description="7일 추천, 주간 준비 의류와 기온 요약",
 )
 def get_weekly(latitude: Latitude, longitude: Longitude, service: OutfitServiceDependency) -> ApiResponse[WeeklyOutfitResponse]:

@@ -28,7 +28,7 @@ from app.common.errors.openapi import error_code_table, error_responses
 from app.common.responses import ApiResponse
 from app.outfits.presentation.router import router as outfits_router
 from app.outfits.presentation.neighborhood_router import router as neighborhood_outfits_router
-from app.outfits.bootstrap import get_cached_outfit_service, get_personalized_outfit_cache
+from app.outfits.bootstrap import get_cached_outfit_service, get_personalized_outfit_cache, get_weekly_outfit_batch
 from app.outfits.infrastructure.result_cache import OutfitRefreshWorker
 from app.users.presentation.router import router as users_router
 from app.weather.presentation.router import router as weather_router
@@ -40,11 +40,14 @@ async def lifespan(app: FastAPI):
     initialize_database()
     worker = OutfitRefreshWorker(get_cached_outfit_service())
     personal_worker = OutfitRefreshWorker(get_personalized_outfit_cache())
+    weekly_worker = OutfitRefreshWorker(get_weekly_outfit_batch())
     worker.start()
     personal_worker.start()
+    weekly_worker.start()
     try:
         yield
     finally:
+        weekly_worker.stop()
         personal_worker.stop()
         worker.stop()
 
