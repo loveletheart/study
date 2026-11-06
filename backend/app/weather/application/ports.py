@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from app.weather.domain.models import Coordinates, Location, WeatherForecast
+from app.weather.domain.models import Coordinates, Location, SigunguRegion, WeatherForecast
 
 
 class WeatherProvider(Protocol):
@@ -12,4 +12,24 @@ class WeatherProvider(Protocol):
 
     def get_forecast(self, coordinates: Coordinates) -> WeatherForecast:
         """날씨 예보 조회 인터페이스"""
+        ...
+
+
+class LocationCatalog(Protocol):
+    def save(self, locations: tuple[Location, ...]) -> None:
+        """제공사에서 검증한 지역 검색 결과 보관"""
+        ...
+
+    def get(self, location_id: int) -> Location:
+        """검색에서 선택한 지역 식별자로 대표 위치 조회"""
+        ...
+
+
+class SigunguResolver(Protocol):
+    def resolve(self, location: Location) -> SigunguRegion:
+        """대표 위치의 좌표를 공식 시군구 경계로 판정"""
+        ...
+
+    def get(self, region_id: int) -> Location:
+        """검증한 시군구 코드의 고정 대표 위치 조회"""
         ...

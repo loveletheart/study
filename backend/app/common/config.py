@@ -29,6 +29,9 @@ class Settings:
     gemini_timeout_seconds: float = 60.0
     gemini_max_output_tokens: int = 8192
     outfit_refresh_seconds: float = 3600.0
+    outfit_cache_max_entries: int = 4096
+    vworld_api_key: str = field(default="", repr=False)
+    vworld_domain: str = ""
 
 
 def _number_setting(values: dict, key: str, default: float, minimum: float, maximum: float) -> float:
@@ -97,4 +100,7 @@ def get_settings() -> Settings:
         gemini_timeout_seconds=_number_setting(values, "STUDY_GEMINI_TIMEOUT_SECONDS", 60, 1, 300),
         gemini_max_output_tokens=_integer_setting(values, "STUDY_GEMINI_MAX_OUTPUT_TOKENS", 8192, 128, 32768),
         outfit_refresh_seconds=_number_setting(values, "STUDY_OUTFIT_REFRESH_SECONDS", 3600, 60, 86400),
+        outfit_cache_max_entries=_integer_setting(values, "STUDY_OUTFIT_CACHE_MAX_ENTRIES", 4096, 1, 100000),
+        vworld_api_key=(values.get("VWORLD_API_KEY") or "").strip(),
+        vworld_domain=(values.get("STUDY_VWORLD_DOMAIN") or "").strip(),
     )

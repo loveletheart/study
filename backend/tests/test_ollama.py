@@ -20,7 +20,7 @@ from app.outfits.application.exceptions import (
     OutfitLlmModelNotFoundError, OutfitLlmNotConfiguredError, OutfitLlmResponseError,
     OutfitLlmTimeoutError, OutfitLlmUnavailableError,
 )
-from app.outfits.application.services import OutfitService
+from app.outfits.application.services.outfit_service import OutfitService
 from app.outfits.bootstrap import get_outfit_service
 from app.outfits.domain.models import TemperatureBasis
 from app.outfits.domain.rules import build_weekly_wardrobe, temperature_reference

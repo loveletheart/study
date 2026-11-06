@@ -2,6 +2,12 @@ from app.common.errors.codes import ErrorCode
 from app.common.errors.exceptions import AppError
 
 
+class RegionNotConfiguredError(AppError):
+    """공식 경계 조회에 필요한 인증 키 미설정."""
+
+    error_code = ErrorCode.WEATHER_REGION_NOT_CONFIGURED
+
+
 class WeatherError(AppError):
     """날씨 조회 기능의 공개 오류 계약."""
 

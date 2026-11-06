@@ -71,10 +71,12 @@ class RecommendationEngineResponse(AttributeResponse):
 class OutfitMetadataResponse(AttributeResponse):
     coordinates: OutfitCoordinatesResponse = Field(description="요청한 위치의 위도·경도")
     timezone: str = Field(description="예보와 추천 날짜의 시간대. Asia/Seoul")
-    fetched_at: datetime = Field(description="서버가 날씨 데이터를 가져온 시각. 캐시 재사용 시 최초 조회 시각")
+    fetched_at: datetime = Field(description="추천에 사용한 날씨의 최근 조회 시각. 날씨가 같아 기본 추천을 재사용하면 generated_at과 다를 수 있음")
+    generated_at: datetime | None = Field(default=None, description="기본 추천을 실제 생성한 시각. 구버전 저장값이면 null")
+    base_version: str | None = Field(default=None, description="공통 추천 생성 버전. 날씨가 같으면 갱신해도 유지")
     provider: str = Field(description="날씨 데이터 제공사")
     source_url: str = Field(description="화면에 표시할 날씨 데이터 출처 링크")
-    engine: RecommendationEngineResponse = Field(description="실제 옷차림을 생성한 LLM 정보")
+    engine: RecommendationEngineResponse = Field(description="공통 기본 추천을 생성한 LLM 정보. 동네 경로의 개인 맞춤 생성 정보는 personalization.engine 참조")
     notice: str = Field(default="날씨 기반의 일반적인 참고 추천입니다. 개인의 체감과 실제 예보에 맞춰 조절하세요.", description="추천 이용 안내")
 
 
@@ -92,7 +94,10 @@ class TodayOutfitResponse(OutfitMetadataResponse):
     @classmethod
     def from_result(cls, result: TodayOutfitResult) -> "TodayOutfitResponse":
         """오늘 추천 결과를 응답으로 변환"""
-        return cls.model_validate({**_metadata(result.forecast), "engine": result.engine, "recommendation": result.recommendation})
+        return cls.model_validate({
+            **_metadata(result.forecast), "engine": result.engine, "recommendation": result.recommendation,
+            "generated_at": result.generated_at, "base_version": result.base_version,
+        })
 
 
 class WeeklyOutfitResponse(OutfitMetadataResponse):
@@ -106,4 +111,5 @@ class WeeklyOutfitResponse(OutfitMetadataResponse):
         return cls.model_validate({
             **_metadata(result.forecast), "daily": result.daily,
             "wardrobe": result.wardrobe, "summary": result.summary, "engine": result.engine,
+            "generated_at": result.generated_at, "base_version": result.base_version,
         })

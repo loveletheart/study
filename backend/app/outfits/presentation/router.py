@@ -23,6 +23,7 @@ router = APIRouter(prefix="/outfits", tags=["outfits"], responses=error_response
     ErrorCode.OUTFIT_CLOUD_TIMEOUT,
     ErrorCode.OUTFIT_CLOUD_INVALID_RESPONSE,
     ErrorCode.WEATHER_INVALID_QUERY,
+    ErrorCode.WEATHER_REGION_NOT_CONFIGURED,
     ErrorCode.WEATHER_INVALID_RESPONSE,
     ErrorCode.WEATHER_UNAVAILABLE,
     ErrorCode.WEATHER_RATE_LIMITED,

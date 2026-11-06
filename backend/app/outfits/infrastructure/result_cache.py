@@ -13,7 +13,7 @@ from pydantic import TypeAdapter, ValidationError
 from app.common.database import connect_database
 from app.outfits.application.dto import TodayOutfitResult, WeeklyOutfitResult
 from app.outfits.application.exceptions import OutfitForecastError
-from app.outfits.application.services import OutfitService
+from app.outfits.application.services.outfit_service import OutfitService
 from app.weather.domain.models import KST
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS outfit_result_cache (
     longitude REAL NOT NULL,
     requested_at REAL NOT NULL,
     attempted_at REAL NOT NULL DEFAULT 0,
+    prepared_for REAL NOT NULL DEFAULT 0,
     updated_at REAL,
     payload BLOB,
     PRIMARY KEY (scope, kind, latitude, longitude)
@@ -37,12 +38,16 @@ class CachedOutfitService:
     def __init__(
         self, database_path: Path, scope: str, service_factory: Callable[[], OutfitService],
         refresh_seconds: float = 3600, clock: Callable[[], datetime] | None = None,
+        reuse_unchanged_weather: bool = False,
+        max_entries: int = 128,
     ) -> None:
         """저장 경로와 갱신 주기를 설정한다."""
         self._database_path = database_path
         self._scope = scope
         self._service_factory = service_factory
         self._refresh_seconds = refresh_seconds
+        self._reuse_unchanged_weather = reuse_unchanged_weather
+        self._max_entries = max_entries
         self._clock = clock or (lambda: datetime.now(KST))
         self._generation_locks = WeakValueDictionary()
         self._generation_locks_guard = Lock()
@@ -57,6 +62,8 @@ class CachedOutfitService:
                 connection.execute(
                     "UPDATE outfit_result_cache SET requested_at=COALESCE(updated_at, attempted_at, 0)",
                 )
+            if "prepared_for" not in columns:
+                connection.execute("ALTER TABLE outfit_result_cache ADD COLUMN prepared_for REAL NOT NULL DEFAULT 0")
 
     def get_today(self, latitude: float, longitude: float) -> TodayOutfitResult:
         """오늘 추천을 재사용하고 저장된 결과가 없을 때만 생성한다."""
@@ -65,6 +72,14 @@ class CachedOutfitService:
     def get_weekly(self, latitude: float, longitude: float) -> WeeklyOutfitResult:
         """주간 추천을 재사용하고 저장된 결과가 없을 때만 생성한다."""
         return self._get("weekly", latitude, longitude)
+
+    def get_region_today(self, location_id: int, latitude: float, longitude: float) -> TodayOutfitResult:
+        """지역 식별자·대표 좌표별 공통 오늘 추천 조회"""
+        return self._get(f"region:{location_id}:today", latitude, longitude)
+
+    def get_region_weekly(self, location_id: int, latitude: float, longitude: float) -> WeeklyOutfitResult:
+        """지역 식별자·대표 좌표별 공통 주간 추천 조회"""
+        return self._get(f"region:{location_id}:weekly", latitude, longitude)
 
     def _key(self, kind: str, latitude: float, longitude: float) -> tuple:
         """제공사 설정·조회 종류·정확한 좌표로 저장 키 구성"""
@@ -90,7 +105,8 @@ class CachedOutfitService:
             )
             connection.execute(
                 "DELETE FROM outfit_result_cache WHERE rowid NOT IN "
-                "(SELECT rowid FROM outfit_result_cache ORDER BY requested_at DESC, rowid DESC LIMIT 128)",
+                "(SELECT rowid FROM outfit_result_cache ORDER BY requested_at DESC, rowid DESC LIMIT ?)",
+                (self._max_entries,),
             )
         cached = self._read(key)
         if cached is not None:
@@ -114,23 +130,29 @@ class CachedOutfitService:
         if not 0 <= now.timestamp() - row["updated_at"] <= self._refresh_seconds * 3:
             return None
         try:
-            result = RESULT_ADAPTERS[key[1]].validate_json(row["payload"])
+            result = RESULT_ADAPTERS[key[1].rsplit(":", 1)[-1]].validate_json(row["payload"])
         except ValidationError:
             return None
         if result.forecast.today != now.date():
             return None
         return result
 
-    def _generate(self, key: tuple):
+    def _generate(self, key: tuple, record_attempt: bool = True):
         """시도 시각을 기록하고 성공한 결과만 원자적으로 교체"""
-        with closing(connect_database(self._database_path)) as connection, connection:
-            connection.execute(
-                "UPDATE outfit_result_cache SET attempted_at=? WHERE scope=? AND kind=? AND latitude=? AND longitude=?",
-                (self._clock().timestamp(), *key),
-            )
+        if record_attempt:
+            with closing(connect_database(self._database_path)) as connection, connection:
+                connection.execute(
+                    "UPDATE outfit_result_cache SET attempted_at=?, prepared_for=0 "
+                    "WHERE scope=? AND kind=? AND latitude=? AND longitude=?",
+                    (self._clock().timestamp(), *key),
+                )
         service = self._service_factory()
-        kind, latitude, longitude = key[1:]
-        result = getattr(service, "get_" + kind)(latitude, longitude)
+        kind, latitude, longitude = key[1].rsplit(":", 1)[-1], key[2], key[3]
+        previous = self._read(key) if self._reuse_unchanged_weather else None
+        if previous is None:
+            result = getattr(service, "get_" + kind)(latitude, longitude)
+        else:
+            result = getattr(service, "refresh_" + kind)(latitude, longitude, previous)
         if result.forecast.today != self._clock().astimezone(KST).date():
             raise OutfitForecastError()
         payload = RESULT_ADAPTERS[kind].dump_json(result)
@@ -141,6 +163,39 @@ class CachedOutfitService:
                 (payload, self._clock().timestamp(), *key),
             )
         return result
+
+    def prepare_region(self, location_id: int, kind: str, latitude: float, longitude: float, lead_seconds: float):
+        """공통 갱신 기한 전 새 날씨와 기본 버전을 준비하되 정규 갱신 주기는 유지"""
+        if kind not in RESULT_ADAPTERS:
+            raise ValueError("Unknown outfit kind")
+        key = self._key(f"region:{location_id}:{kind}", latitude, longitude)
+        with self._lock_for(key):
+            with closing(connect_database(self._database_path)) as connection:
+                row = connection.execute(
+                    "SELECT attempted_at, prepared_for FROM outfit_result_cache "
+                    "WHERE scope=? AND kind=? AND latitude=? AND longitude=?", key,
+                ).fetchone()
+            if row is None:
+                return None
+            due = row["attempted_at"] + self._refresh_seconds
+            now = self._clock().astimezone(KST)
+            if now.timestamp() < due - lead_seconds or datetime.fromtimestamp(due, KST).date() != now.date():
+                return None
+            if row["prepared_for"] == -due:
+                return None
+            if row["prepared_for"] < due:
+                with closing(connect_database(self._database_path)) as connection, connection:
+                    connection.execute(
+                        "UPDATE outfit_result_cache SET prepared_for=? "
+                        "WHERE scope=? AND kind=? AND latitude=? AND longitude=?", (-due, *key),
+                    )
+                self._generate(key, record_attempt=False)
+                with closing(connect_database(self._database_path)) as connection, connection:
+                    connection.execute(
+                        "UPDATE outfit_result_cache SET prepared_for=? "
+                        "WHERE scope=? AND kind=? AND latitude=? AND longitude=?", (due, *key),
+                    )
+            return due, self._read(key)
 
     def refresh_due(self, stopped: Event | None = None) -> None:
         """조회 이력이 있는 지역을 순차 갱신하고 실패한 지역은 다음 주기에 재시도"""
@@ -159,7 +214,7 @@ class CachedOutfitService:
                     return
                 with closing(connect_database(self._database_path)) as connection:
                     current = connection.execute(
-                        "SELECT attempted_at FROM outfit_result_cache WHERE scope=? AND kind=? AND latitude=? AND longitude=?",
+                        "SELECT attempted_at, prepared_for FROM outfit_result_cache WHERE scope=? AND kind=? AND latitude=? AND longitude=?",
                         key,
                     ).fetchone()
                 now = self._clock().astimezone(KST)
@@ -168,6 +223,14 @@ class CachedOutfitService:
                     now.timestamp() - current["attempted_at"] < self._refresh_seconds
                     and current["attempted_at"] >= midnight
                 ):
+                    continue
+                due = current["attempted_at"] + self._refresh_seconds
+                if current["prepared_for"] >= due and self._read(key) is not None:
+                    with closing(connect_database(self._database_path)) as connection, connection:
+                        connection.execute(
+                            "UPDATE outfit_result_cache SET attempted_at=?, prepared_for=0 "
+                            "WHERE scope=? AND kind=? AND latitude=? AND longitude=?", (due, *key),
+                        )
                     continue
                 try:
                     self._generate(key)

@@ -284,6 +284,7 @@ class OutfitCacheTests(unittest.TestCase):
             patch.dict(app.dependency_overrides, {get_cached_outfit_service: lambda: self.cache}),
             patch("main.initialize_database"),
             patch("main.get_cached_outfit_service", return_value=self.cache),
+            patch("main.get_personalized_outfit_cache"),
             patch("main.OutfitRefreshWorker") as worker,
         ):
             with TestClient(app) as client:
@@ -293,8 +294,8 @@ class OutfitCacheTests(unittest.TestCase):
                     second = client.get(url)
                     self.assertEqual(first.status_code, 200)
                     self.assertEqual(first.json(), second.json())
-                worker.return_value.start.assert_called_once()
-            worker.return_value.stop.assert_called_once()
+                self.assertEqual(worker.return_value.start.call_count, 2)
+            self.assertEqual(worker.return_value.stop.call_count, 2)
         self.assertEqual(self.factory.call_count, 2)
 
 

@@ -1,20 +1,24 @@
 from app.weather.application.dto import LocationSearchResult, TodayWeatherResult
 from app.weather.application.exceptions import InvalidWeatherQueryError, WeatherProviderDataError
-from app.weather.application.ports import WeatherProvider
+from app.weather.application.ports import LocationCatalog, WeatherProvider
 from app.weather.domain.models import Coordinates, KST, WeatherForecast
 
 
 class WeatherService:
-    def __init__(self, provider: WeatherProvider) -> None:
+    def __init__(self, provider: WeatherProvider, locations: LocationCatalog | None = None) -> None:
         """날씨 제공사 주입"""
         self._provider = provider
+        self._locations = locations
 
     def search_locations(self, query: str, limit: int = 5) -> LocationSearchResult:
         """검색 조건 검증 후 지역 조회"""
         query = query.strip()
         if not 2 <= len(query) <= 100 or not 1 <= limit <= 10:
             raise InvalidWeatherQueryError("지역명은 2~100자, 검색 개수는 1~10이어야 합니다.")
-        return LocationSearchResult(self._provider.search_locations(query, limit))
+        result = LocationSearchResult(self._provider.search_locations(query, limit))
+        if self._locations is not None:
+            self._locations.save(result.locations)
+        return result
 
     def get_today(self, latitude: float, longitude: float) -> TodayWeatherResult:
         """오늘 예보와 시간별 정보 구성"""

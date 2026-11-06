@@ -1,4 +1,4 @@
-"""로컬 추천 실패 시 명시적으로 설정된 클라우드로 전환."""
+"""로컬 우선과 허용된 실패에 대한 클라우드 전환 정책."""
 
 import logging
 from collections.abc import Callable
