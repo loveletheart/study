@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from app.outfits.domain.models import OutfitRecommendation, OutfitWeather, WeeklyWardrobe
-from app.outfits.domain.preferences import OutfitPreferences
+from app.outfits.domain.models import OutfitPreferences
 from app.weather.domain.models import Location, SigunguRegion
 
 
@@ -59,7 +59,7 @@ class WeeklyOutfitResult:
 
 
 @dataclass(frozen=True)
-class NeighborhoodResult:
+class RegionOutfitResult:
     location: Location
     result: TodayOutfitResult | WeeklyOutfitResult
     preferences: OutfitPreferences

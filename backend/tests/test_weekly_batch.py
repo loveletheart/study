@@ -10,11 +10,11 @@ from unittest.mock import Mock, patch
 
 from app.common.config import get_settings
 from app.outfits.application.exceptions import OutfitLlmTimeoutError, WeeklyOutfitNotReadyError
-from app.outfits.application.services.neighborhood_service import NeighborhoodOutfitService
-from app.outfits.domain.preferences import OutfitPreferences, OutfitStyle
-from app.outfits.infrastructure.ollama_client import OllamaClient
-from app.outfits.infrastructure.personalized_cache import SQLitePersonalizedOutfitCache
-from app.outfits.infrastructure.result_cache import CachedOutfitService
+from app.outfits.application.services import RegionOutfitService
+from app.outfits.domain.models import OutfitPreferences, OutfitStyle
+from app.outfits.infrastructure.clients import OllamaClient
+from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache
+from app.outfits.infrastructure.cache import CachedOutfitService
 from app.outfits.presentation.schemas import WeeklyOutfitResponse
 from app.weather.domain.models import KST, Location, SigunguRegion
 from app.weather.infrastructure.cache import TTLCache
@@ -138,7 +138,7 @@ class WeeklyBatchTests(unittest.TestCase):
         self.at(1, days=1)
         self.cache.get_weekly(37, 127)
         self.fixture.llm.chat.side_effect = OutfitLlmTimeoutError()
-        with self.assertLogs("app.outfits.infrastructure.result_cache", level="WARNING"):
+        with self.assertLogs("app.outfits.infrastructure.cache", level="WARNING"):
             failed = self.cache.run_weekly_batch()
         self.assertEqual(failed["status"], "partial_failure")
         self.assertEqual(self.cache.run_weekly_batch()["status"], "already_run")
@@ -161,7 +161,7 @@ class WeeklyBatchTests(unittest.TestCase):
             self.database_path, "personal", personalizer, self.cache, regions,
             clock=lambda: self.fixture.now, weekly_batch_only=True,
         )
-        service = NeighborhoodOutfitService(locations, self.cache, personal, regions)
+        service = RegionOutfitService(locations, self.cache, personal, regions)
         preferences = OutfitPreferences(style=OutfitStyle.FORMAL)
         with self.assertRaises(WeeklyOutfitNotReadyError):
             service.get_weekly(1001, preferences)
@@ -180,7 +180,7 @@ class WeeklyBatchTests(unittest.TestCase):
 
 
 class TodayContextTests(unittest.TestCase):
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_today_uses_4096_and_weekly_preserves_general_context(self, urlopen):
         import json
 

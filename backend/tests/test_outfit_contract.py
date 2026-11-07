@@ -14,9 +14,9 @@ from app.outfits.application.exceptions import OutfitLlmResponseError
 from app.outfits.bootstrap import get_cached_outfit_service, get_personalized_outfit_cache
 from app.outfits.domain.models import OutfitLook, OutfitType
 from app.outfits.domain.rules import build_weekly_wardrobe
-from app.outfits.infrastructure.gemini_recommender import GeminiOutfitRecommender
-from app.outfits.infrastructure.llm_schemas import GeneratedLook
-from app.outfits.infrastructure.ollama_recommender import OllamaOutfitRecommender
+from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender
+from app.outfits.infrastructure.schemas import GeneratedLook
+from app.outfits.infrastructure.recommenders import OllamaOutfitRecommender
 from app.outfits.infrastructure.prompts import LOOK_EXAMPLES, build_messages
 from app.outfits.presentation.schemas import TodayOutfitResponse
 from tests import test_outfits as fixtures

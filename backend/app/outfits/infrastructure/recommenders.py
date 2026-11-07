@@ -1,15 +1,19 @@
+"""공통 생성 검증·제공사별 생성기·개인화를 한곳에서 관리한다."""
+
 from typing import Protocol
-
 from pydantic import ValidationError
-
 from app.common.errors.exceptions import AppError
-
 from app.outfits.application.dto import GeneratedOutfits, RecommendationEngine
-from app.outfits.application.exceptions import OutfitLlmNotConfiguredError, OutfitLlmResponseError
-from app.outfits.domain.models import OutfitLook, OutfitRecommendation, OutfitWeather, TemperatureBasis
+from app.outfits.application.exceptions import OutfitLlmNotConfiguredError, OutfitLlmResponseError, OutfitCloudNotConfiguredError, OutfitCloudResponseError
+from app.outfits.domain.models import OutfitLook, OutfitRecommendation, OutfitWeather, TemperatureBasis, OutfitPreferences
 from app.outfits.domain.rules import temperature_reference
-from app.outfits.infrastructure.llm_schemas import GeneratedLook, GeneratedResponse
-from app.outfits.infrastructure.prompts import PROMPT_VERSION, build_messages
+from app.outfits.infrastructure.schemas import GeneratedLook, GeneratedResponse
+from app.outfits.infrastructure.prompts import PROMPT_VERSION, build_messages, PERSONALIZATION_VERSION, PERSONALIZATION_INSTRUCTION, _personal_requirements
+from app.outfits.infrastructure.clients import OllamaClient, GeminiClient
+import json
+from collections.abc import Callable
+from dataclasses import asdict, replace
+from app.outfits.application.ports import OutfitRecommender
 
 
 def _look(value: GeneratedLook) -> OutfitLook:
@@ -80,3 +84,45 @@ class StructuredOutfitRecommender:
         return GeneratedOutfits(
             tuple(recommendations), RecommendationEngine(self._provider, self._model, PROMPT_VERSION),
         )
+
+
+class OllamaOutfitRecommender(StructuredOutfitRecommender):
+    def __init__(self, client: OllamaClient, model: str) -> None:
+        """Ollama 응답에 공통 추천 검증 적용"""
+        super().__init__(client, model, "ollama")
+
+
+class GeminiOutfitRecommender(StructuredOutfitRecommender):
+    def __init__(self, client: GeminiClient, model: str) -> None:
+        """Gemini 응답에 공통 옷차림 검증과 클라우드 오류 처리를 적용한다."""
+        super().__init__(client, model, "gemini", OutfitCloudResponseError, OutfitCloudNotConfiguredError)
+
+
+class PersonalizationChatClient:
+    def __init__(self, client: StructuredChatClient, preferences: OutfitPreferences) -> None:
+        """날씨 검증용 클라이언트에 개인화 문맥을 추가한다."""
+        self._client = client
+        self._preferences = preferences
+
+    def chat(self, model: str, messages: list[dict[str, str]], schema: dict) -> str:
+        """응답 문구를 코드에서 합성하지 않고 모델의 검증 대상 JSON으로 받는다."""
+        content = json.loads(messages[1]["content"])
+        content["preferences"] = asdict(self._preferences)
+        content["personal_requirements"] = _personal_requirements(self._preferences)
+        contextual = [
+            {"role": "system", "content": messages[0]["content"] + "\n" + PERSONALIZATION_INSTRUCTION},
+            {"role": "user", "content": json.dumps(content, ensure_ascii=False, allow_nan=False, default=str)},
+        ]
+        return self._client.chat(model, contextual, schema)
+
+
+class LlmOutfitPersonalizer:
+    def __init__(self, factory: Callable[[GeneratedOutfits, OutfitPreferences], OutfitRecommender]) -> None:
+        """지역 공통 추천과 동일한 통신·검증·전환 정책 사용"""
+        self._factory = factory
+
+    def personalize(self, base: GeneratedOutfits, preferences: OutfitPreferences) -> GeneratedOutfits:
+        """동적 생성 결과에 개인화 프롬프트 버전과 실제 제공사 기록"""
+        days = tuple(item.weather for item in base.recommendations)
+        generated = self._factory(base, preferences).recommend(days)
+        return replace(generated, engine=replace(generated.engine, prompt_version=PERSONALIZATION_VERSION))

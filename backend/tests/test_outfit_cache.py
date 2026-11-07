@@ -17,7 +17,8 @@ from app.common.config import get_settings
 from app.common.database import connect_database
 from app.outfits.application.exceptions import OutfitForecastError, OutfitLlmTimeoutError
 from app.outfits.bootstrap import get_cached_outfit_service
-from app.outfits.infrastructure.result_cache import CachedOutfitService, OutfitRefreshWorker
+from app.outfits.infrastructure.cache import CachedOutfitService
+from app.outfits.infrastructure.jobs import OutfitRefreshWorker
 from main import app
 from tests import test_outfits as fixtures
 
@@ -90,13 +91,13 @@ class OutfitCacheTests(unittest.TestCase):
         first = self.cache.get_today(37, 127)
         self.now += timedelta(hours=1)
         self.service.get_today.side_effect = OutfitLlmTimeoutError()
-        with self.assertLogs("app.outfits.infrastructure.result_cache", level="WARNING"):
+        with self.assertLogs("app.outfits.infrastructure.cache", level="WARNING"):
             self.cache.refresh_due()
         self.assertEqual(self.cache.get_today(37, 127), first)
         self.cache.refresh_due()
         self.assertEqual(self.factory.call_count, 2)
         self.now += timedelta(hours=1)
-        with self.assertLogs("app.outfits.infrastructure.result_cache", level="WARNING"):
+        with self.assertLogs("app.outfits.infrastructure.cache", level="WARNING"):
             self.cache.refresh_due()
         self.assertEqual(self.factory.call_count, 3)
 
@@ -270,7 +271,7 @@ class OutfitCacheTests(unittest.TestCase):
         service.refresh_due.side_effect = refresh
         worker = OutfitRefreshWorker(service)
         with patch.object(worker._stopped, "wait", return_value=False):
-            with self.assertLogs("app.outfits.infrastructure.result_cache", level="WARNING"):
+            with self.assertLogs("app.outfits.infrastructure.jobs", level="WARNING"):
                 worker.start()
                 try:
                     self.assertTrue(called.wait(2))

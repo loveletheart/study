@@ -3,24 +3,23 @@ import json
 from functools import lru_cache
 
 from app.common.config import Settings, get_settings
-from app.outfits.application.policies.fallback_recommender import FallbackOutfitRecommender
+from app.outfits.application.policies import FallbackOutfitRecommender
 from app.outfits.application.dto import GeneratedOutfits
 from app.outfits.application.ports import OutfitRecommender
 from app.outfits.application.exceptions import OutfitCloudNotConfiguredError, OutfitCloudResponseError
-from app.outfits.application.services.outfit_service import OutfitService
-from app.outfits.application.services.neighborhood_service import NeighborhoodOutfitService
-from app.outfits.infrastructure.ollama_client import OllamaClient
-from app.outfits.infrastructure.ollama_recommender import OllamaOutfitRecommender
-from app.outfits.infrastructure.gemini_client import GeminiClient
-from app.outfits.infrastructure.gemini_recommender import GeminiOutfitRecommender
+from app.outfits.application.services import OutfitService, RegionOutfitService
+from app.outfits.infrastructure.clients import OllamaClient
+from app.outfits.infrastructure.recommenders import OllamaOutfitRecommender
+from app.outfits.infrastructure.clients import GeminiClient
+from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender
 from app.outfits.infrastructure.weather_reader import WeatherServiceReader
 from app.outfits.infrastructure.prompts import PROMPT_VERSION
-from app.outfits.infrastructure.result_cache import CachedOutfitService
-from app.outfits.infrastructure.llm_personalizer import LlmOutfitPersonalizer, PersonalizationChatClient, PERSONALIZATION_VERSION
-from app.outfits.infrastructure.personalized_cache import SQLitePersonalizedOutfitCache
-from app.outfits.infrastructure.weekly_batch import WeeklyOutfitBatch
-from app.outfits.infrastructure.structured_recommender import StructuredOutfitRecommender
-from app.outfits.domain.preferences import OutfitPreferences
+from app.outfits.infrastructure.cache import CachedOutfitService
+from app.outfits.infrastructure.recommenders import LlmOutfitPersonalizer, PersonalizationChatClient, PERSONALIZATION_VERSION
+from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache
+from app.outfits.infrastructure.jobs import WeeklyOutfitBatch
+from app.outfits.infrastructure.recommenders import StructuredOutfitRecommender
+from app.outfits.domain.models import OutfitPreferences
 from app.weather.bootstrap import get_location_catalog, get_sigungu_resolver, get_weather_service
 
 
@@ -83,9 +82,9 @@ def get_cached_outfit_service() -> CachedOutfitService:
     )
 
 
-def get_neighborhood_outfit_service() -> NeighborhoodOutfitService:
+def get_region_outfit_service() -> RegionOutfitService:
     """대표 지역 기준의 공유 추천과 요청별 개인화 조립"""
-    return NeighborhoodOutfitService(
+    return RegionOutfitService(
         get_location_catalog(), get_cached_outfit_service(), get_personalized_outfit_cache(), get_sigungu_resolver(),
     )
 

@@ -12,10 +12,10 @@ from pydantic import TypeAdapter, ValidationError
 
 from app.common.errors.handlers import handle_app_error
 from app.outfits.application.exceptions import OutfitForecastError
-from app.outfits.application.services.outfit_service import OutfitService
+from app.outfits.application.services import OutfitService
 from app.outfits.domain.models import OutfitWeather, TemperatureBasis
-from app.outfits.infrastructure.ollama_client import OllamaClient
-from app.outfits.infrastructure.ollama_recommender import OllamaOutfitRecommender
+from app.outfits.infrastructure.clients import OllamaClient
+from app.outfits.infrastructure.recommenders import OllamaOutfitRecommender
 from app.outfits.infrastructure.weather_reader import WeatherServiceReader
 from app.outfits.presentation.router import Latitude, Longitude, get_today, get_weekly
 from app.outfits.presentation.schemas import TodayOutfitResponse

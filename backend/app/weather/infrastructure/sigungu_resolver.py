@@ -2,6 +2,7 @@
 
 from contextlib import closing
 from datetime import datetime
+import logging
 from pathlib import Path
 
 from app.common.database import connect_database
@@ -13,6 +14,7 @@ from app.weather.domain.models import Coordinates, KST, Location, SigunguRegion
 from app.weather.infrastructure.http_client import JsonHttpClient
 
 VWORLD_DATA_URL = "https://api.vworld.kr/req/data"
+logger = logging.getLogger(__name__)
 
 
 class VWorldSigunguResolver:
@@ -54,13 +56,37 @@ class VWorldSigunguResolver:
             raise InvalidWeatherQueryError("국내 위치만 시군구로 판정할 수 있습니다.")
         with closing(connect_database(self._database_path)) as connection:
             cached = connection.execute(
-                "SELECT code FROM weather_sigungu_points WHERE latitude=? AND longitude=? AND resolved_at>=?",
-                (location.latitude, location.longitude, self._clock().timestamp() - 86400),
+                "SELECT code, resolved_at FROM weather_sigungu_points WHERE latitude=? AND longitude=?",
+                (location.latitude, location.longitude),
             ).fetchone()
-        if cached is not None:
+        if cached is not None and cached["resolved_at"] >= self._clock().timestamp() - 86400:
             return self._region(cached["code"])
-        if not self._api_key:
-            raise RegionNotConfiguredError()
+        try:
+            if not self._api_key:
+                raise RegionNotConfiguredError()
+            region = self._fetch_region(location)
+        except AppError as exc:
+            if cached is None:
+                raise
+            logger.warning(
+                "시군구 재판정 실패로 만료된 저장 판정 재사용: code=%s, cause=%s",
+                cached["code"], type(exc).__name__,
+            )
+            return self._region(cached["code"])
+        with closing(connect_database(self._database_path)) as connection, connection:
+            connection.execute(
+                "INSERT INTO weather_sigungu_regions VALUES (?, ?, ?, ?) ON CONFLICT(code) DO UPDATE SET name=excluded.name",
+                (region.code, region.name, region.latitude, region.longitude),
+            )
+            connection.execute(
+                "INSERT INTO weather_sigungu_points VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(latitude, longitude) DO UPDATE SET code=excluded.code, resolved_at=excluded.resolved_at",
+                (location.latitude, location.longitude, region.code, self._clock().timestamp()),
+            )
+        return self._region(region.code)
+
+    def _fetch_region(self, location: Location) -> SigunguRegion:
+        """외부 조회와 응답 검증에 성공한 시군구만 반환한다."""
         parameters = {
             "service": "data", "request": "GetFeature", "version": "2.0", "data": "LT_C_ADSIGG_INFO",
             "geomfilter": f"POINT({location.longitude} {location.latitude})", "crs": "EPSG:4326",
@@ -80,21 +106,11 @@ class VWorldSigunguResolver:
                 raise WeatherProviderUnavailableError("브이월드 인증·도메인 및 시군구 데이터 이용 설정을 확인해 주세요.")
             features = response["result"]["featureCollection"]["features"]
             if not isinstance(features, list):
-                raise ValueError("Invalid feature collection")
+                raise ValueError("시군구 경계 조회 결과의 목록 형식이 올바르지 않습니다.")
             if len(features) != 1:
                 raise InvalidWeatherQueryError("경계에 걸치거나 판정할 수 없는 위치입니다. 구역 안쪽의 위치를 선택해 주세요.")
             properties = features[0]["properties"]
             region = SigunguRegion(properties["sig_cd"], properties["sig_kor_nm"], location.latitude, location.longitude)
         except (KeyError, TypeError, ValueError, AttributeError):
             raise WeatherProviderDataError() from None
-        with closing(connect_database(self._database_path)) as connection, connection:
-            connection.execute(
-                "INSERT INTO weather_sigungu_regions VALUES (?, ?, ?, ?) ON CONFLICT(code) DO UPDATE SET name=excluded.name",
-                (region.code, region.name, region.latitude, region.longitude),
-            )
-            connection.execute(
-                "INSERT INTO weather_sigungu_points VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(latitude, longitude) DO UPDATE SET code=excluded.code, resolved_at=excluded.resolved_at",
-                (location.latitude, location.longitude, region.code, self._clock().timestamp()),
-            )
-        return self._region(region.code)
+        return region

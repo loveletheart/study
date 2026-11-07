@@ -16,13 +16,13 @@ from fastapi.testclient import TestClient
 from app.common.database import connect_database
 from app.common.config import get_settings
 from app.outfits.application.exceptions import OutfitLlmTimeoutError
-from app.outfits.application.services.neighborhood_service import NeighborhoodOutfitService
-from app.outfits.bootstrap import get_neighborhood_outfit_service
-from app.outfits.domain.preferences import Activity, ColdSensitivity, OutfitPreferences, OutfitStyle
-from app.outfits.infrastructure.llm_personalizer import LlmOutfitPersonalizer, PersonalizationChatClient
-from app.outfits.infrastructure.personalized_cache import SQLitePersonalizedOutfitCache
-from app.outfits.infrastructure.structured_recommender import StructuredOutfitRecommender
-from app.outfits.infrastructure.result_cache import CachedOutfitService
+from app.outfits.application.services import RegionOutfitService
+from app.outfits.bootstrap import get_region_outfit_service
+from app.outfits.domain.models import Activity, ColdSensitivity, OutfitPreferences, OutfitStyle
+from app.outfits.infrastructure.recommenders import LlmOutfitPersonalizer, PersonalizationChatClient
+from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache
+from app.outfits.infrastructure.recommenders import StructuredOutfitRecommender
+from app.outfits.infrastructure.cache import CachedOutfitService
 from app.weather.application.exceptions import InvalidWeatherQueryError
 from app.weather.application.services import WeatherService
 from app.weather.bootstrap import get_weather_service
@@ -35,12 +35,12 @@ from tests import test_outfits as fixtures
 from tests.test_weather import forecast_payload
 
 
-class NeighborhoodTests(unittest.TestCase):
+class RegionTests(unittest.TestCase):
     def setUp(self):
         """검증용 지역·날씨·모델과 임시 저장소 준비"""
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.database_path = Path(directory.name) / "neighborhood.db"
+        self.database_path = Path(directory.name) / "regions.db"
         self.fixture = fixtures.OutfitIntegrationTests()
         self.fixture.setUp()
         self.fixture.weather_service._provider._cache = TTLCache(0)
@@ -77,7 +77,7 @@ class NeighborhoodTests(unittest.TestCase):
             self.database_path, "personal-test", self.personalizer, self.cache, self.regions,
             clock=lambda: self.fixture.now,
         )
-        self.service = NeighborhoodOutfitService(self.catalog, self.cache, self.personal_cache, self.regions)
+        self.service = RegionOutfitService(self.catalog, self.cache, self.personal_cache, self.regions)
 
     def test_different_preferences_share_one_generation_and_do_not_mutate_base(self):
         """동일 동네 사용자들의 취향 차이는 공통 결과·캐시 키를 오염시키지 않는다."""
@@ -186,7 +186,7 @@ class NeighborhoodTests(unittest.TestCase):
         self.fixture.payload["daily"]["temperature_2m_max"][0] += 1
         self.fixture.now += timedelta(hours=1)
         self.fixture.llm.chat.side_effect = OutfitLlmTimeoutError()
-        with self.assertLogs("app.outfits.infrastructure.result_cache", level="WARNING"):
+        with self.assertLogs("app.outfits.infrastructure.cache", level="WARNING"):
             self.cache.refresh_due()
         second = self.service.get_today(1001, OutfitPreferences()).result
         self.assertEqual(second, first)
@@ -209,7 +209,7 @@ class NeighborhoodTests(unittest.TestCase):
             self.database_path, "test", self.factory, clock=lambda: self.fixture.now,
             reuse_unchanged_weather=True,
         )
-        restarted = NeighborhoodOutfitService(SQLiteLocationCatalog(self.database_path), cache, self.personal_cache, self.regions)
+        restarted = RegionOutfitService(SQLiteLocationCatalog(self.database_path), cache, self.personal_cache, self.regions)
         self.assertEqual(restarted.get_today(1001, OutfitPreferences()).result, first)
         self.fixture.llm.chat.assert_called_once()
 
@@ -219,7 +219,7 @@ class NeighborhoodTests(unittest.TestCase):
         provider.search_locations.return_value = (self.location,)
         weather_service = WeatherService(provider, self.catalog)
         overrides = {
-            get_neighborhood_outfit_service: lambda: self.service,
+            get_region_outfit_service: lambda: self.service,
             get_weather_service: lambda: weather_service,
         }
         with patch.dict(app.dependency_overrides, overrides):
@@ -261,7 +261,7 @@ class NeighborhoodTests(unittest.TestCase):
         self.assertEqual(request["output_schema"], self.personal_llm.chat.call_args.args[2])
         self.assertEqual(len(request["look_examples"]), 2)
         self.assertNotIn("shared_recommendations", request)
-        self.assertEqual(personal.personalization.generated.engine.prompt_version, "2.3")
+        self.assertEqual(personal.personalization.generated.engine.prompt_version, "2.4")
 
     def test_explicit_personal_conditions_have_distinct_meanings_without_changing_weather(self):
         """각 선택값의 의미를 명시하면서 원본 날씨와 출력 계약을 유지한다."""
@@ -327,7 +327,7 @@ class NeighborhoodTests(unittest.TestCase):
         self.personal_llm.chat.return_value = "invalid JSON"
         self.personal_llm.chat.side_effect = None
         self.fixture.now += timedelta(minutes=50)
-        with self.assertLogs("app.outfits.infrastructure.personalized_cache", level="WARNING"):
+        with self.assertLogs("app.outfits.infrastructure.cache", level="WARNING"):
             self.personal_cache.refresh_due()
         self.personal_cache.refresh_due()
         self.assertEqual(self.personal_llm.chat.call_count, 2)
@@ -349,7 +349,7 @@ class NeighborhoodTests(unittest.TestCase):
             self.database_path, "personal-test", self.personalizer, self.cache, self.regions,
             clock=lambda: self.fixture.now,
         )
-        restarted = NeighborhoodOutfitService(self.catalog, self.cache, restarted_cache, self.regions)
+        restarted = RegionOutfitService(self.catalog, self.cache, restarted_cache, self.regions)
         second = restarted.get_today(1001, preferences)
         self.assertEqual(second.personalization, first.personalization)
         self.assertTrue(second.personalization_cache_hit)
@@ -361,7 +361,7 @@ class NeighborhoodTests(unittest.TestCase):
         self.fixture.payload["daily"]["temperature_2m_max"][0] += 1
         self.fixture.llm.chat.side_effect = OutfitLlmTimeoutError()
         self.fixture.now += timedelta(minutes=50)
-        with self.assertLogs("app.outfits.infrastructure.personalized_cache", level="WARNING"):
+        with self.assertLogs("app.outfits.infrastructure.cache", level="WARNING"):
             self.personal_cache.refresh_due()
         self.personal_cache.refresh_due()
         self.assertEqual(self.fixture.llm.chat.call_count, 2)

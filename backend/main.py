@@ -27,9 +27,8 @@ from app.common.errors.handlers import register_exception_handlers
 from app.common.errors.openapi import error_code_table, error_responses
 from app.common.responses import ApiResponse
 from app.outfits.presentation.router import router as outfits_router
-from app.outfits.presentation.neighborhood_router import router as neighborhood_outfits_router
 from app.outfits.bootstrap import get_cached_outfit_service, get_personalized_outfit_cache, get_weekly_outfit_batch
-from app.outfits.infrastructure.result_cache import OutfitRefreshWorker
+from app.outfits.infrastructure.jobs import OutfitRefreshWorker
 from app.users.presentation.router import router as users_router
 from app.weather.presentation.router import router as weather_router
 
@@ -73,7 +72,6 @@ register_exception_handlers(app)
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
 app.include_router(outfits_router, prefix="/api/v1")
-app.include_router(neighborhood_outfits_router, prefix="/api/v1")
 
 
 @app.get("/", summary="서비스 기본 안내", description="서비스 안내 메시지를 반환합니다.", tags=["system"], responses=error_responses(include_validation=False))

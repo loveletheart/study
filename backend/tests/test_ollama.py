@@ -20,12 +20,12 @@ from app.outfits.application.exceptions import (
     OutfitLlmModelNotFoundError, OutfitLlmNotConfiguredError, OutfitLlmResponseError,
     OutfitLlmTimeoutError, OutfitLlmUnavailableError,
 )
-from app.outfits.application.services.outfit_service import OutfitService
+from app.outfits.application.services import OutfitService
 from app.outfits.bootstrap import get_outfit_service
 from app.outfits.domain.models import TemperatureBasis
 from app.outfits.domain.rules import build_weekly_wardrobe, temperature_reference
-from app.outfits.infrastructure.ollama_client import MAX_RESPONSE_BYTES, OllamaClient
-from app.outfits.infrastructure.ollama_recommender import OllamaOutfitRecommender
+from app.outfits.infrastructure.clients import MAX_RESPONSE_BYTES, OllamaClient
+from app.outfits.infrastructure.recommenders import OllamaOutfitRecommender
 from tests import test_outfits as outfit_fixtures
 from tests.test_outfits import generated_content, weather
 
@@ -46,7 +46,7 @@ def chat_envelope(content: str = '{"days": []}', **changes) -> bytes:
 
 
 class OllamaClientTests(unittest.TestCase):
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_sampling_overrides_preserve_explicit_zero_and_omit_unset_values(self, urlopen):
         urlopen.return_value = http_response(chat_envelope("생성 결과"))
         client = OllamaClient("http://localhost:11434", 180, 4096, temperature=0.5, top_p=0.8, min_p=0)
@@ -59,7 +59,7 @@ class OllamaClientTests(unittest.TestCase):
         options = json.loads(urlopen.call_args.args[0].data)["options"]
         self.assertNotIn("top_p", options)
         self.assertNotIn("min_p", options)
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_chat_sends_the_model_schema_and_non_streaming_options(self, urlopen):
         """로컬 주소·모델·스키마·추론 옵션 전달 확인"""
         urlopen.return_value = http_response(chat_envelope("생성 결과"))
@@ -80,7 +80,7 @@ class OllamaClientTests(unittest.TestCase):
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 180)
         urlopen.return_value.read.assert_called_once_with(MAX_RESPONSE_BYTES + 1)
 
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_explicit_thinking_setting_is_sent_as_an_api_boolean(self, urlopen):
         """추론 모드의 명시적 false도 생략하지 않고 API 최상위 값으로 전달한다."""
         for thinking in (False, True):
@@ -93,7 +93,7 @@ class OllamaClientTests(unittest.TestCase):
                 self.assertIs(payload["think"], thinking)
                 self.assertNotIn("think", payload["options"])
 
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_connection_model_and_timeout_failures_have_public_error_codes(self, urlopen):
         """연결 실패·모델 없음·시간 초과를 공통 오류로 변환"""
         cases = [
@@ -114,7 +114,7 @@ class OllamaClientTests(unittest.TestCase):
                 self.assertEqual(response.status_code, status)
                 self.assertIsNone(json.loads(response.body)["data"])
 
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_invalid_incomplete_or_oversized_chat_responses_are_rejected(self, urlopen):
         """JSON 오류·빈 답변·생성 중단·응답 크기 초과 거부"""
         cases = [
@@ -129,7 +129,7 @@ class OllamaClientTests(unittest.TestCase):
                 with self.assertRaises(OutfitLlmResponseError):
                     OllamaClient("http://localhost:11434", 1, 4096).chat("model", [], {})
 
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_server_error_body_is_not_exposed_to_the_caller(self, urlopen):
         """서버 오류의 내부 문자열을 공개 응답에서 제외"""
         urlopen.return_value = http_response(b'{"error":"private filesystem path"}')

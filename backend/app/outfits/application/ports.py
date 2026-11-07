@@ -2,7 +2,7 @@ from typing import Protocol
 
 from app.outfits.application.dto import GeneratedOutfits, OutfitForecast, PersonalizedOutfits, TodayOutfitResult, WeeklyOutfitResult
 from app.outfits.domain.models import OutfitWeather
-from app.outfits.domain.preferences import OutfitPreferences
+from app.outfits.domain.models import OutfitPreferences
 
 
 class OutfitWeatherReader(Protocol):

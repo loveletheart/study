@@ -1,15 +1,15 @@
-"""날씨 검증과 공통 옷차림 추천의 응용 서비스."""
+"""공통 추천 생성과 시군구·개인화 조합의 응용 서비스."""
 
 from datetime import datetime, timedelta
 from dataclasses import replace
 from uuid import uuid4
-
-from app.outfits.application.dto import GeneratedOutfits, OutfitForecast, TodayOutfitResult, WeeklyOutfitResult
+from app.outfits.application.dto import GeneratedOutfits, OutfitForecast, TodayOutfitResult, WeeklyOutfitResult, RegionOutfitResult
 from app.outfits.application.exceptions import OutfitForecastError, OutfitLlmResponseError
-from app.outfits.application.ports import OutfitRecommender, OutfitWeatherReader
-from app.outfits.domain.models import OutfitWeather
+from app.outfits.application.ports import OutfitRecommender, OutfitWeatherReader, PersonalizedOutfitCache, RegionalOutfitCache
+from app.outfits.domain.models import OutfitWeather, OutfitPreferences
 from app.outfits.domain.rules import build_weekly_wardrobe, temperature_reference
 from app.weather.domain.models import KST
+from app.weather.application.ports import LocationCatalog, SigunguResolver
 
 
 class OutfitService:
@@ -81,3 +81,43 @@ class OutfitService:
         if forecast.timezone != "Asia/Seoul" or tuple(day.date for day in forecast.days) != expected:
             raise OutfitForecastError()
         return forecast
+
+
+class RegionOutfitService:
+    def __init__(
+        self, locations: LocationCatalog, cache: RegionalOutfitCache,
+        personalized: PersonalizedOutfitCache, regions: SigunguResolver,
+    ) -> None:
+        """신뢰한 지역 대표 좌표와 공통 결과 저장소 연결"""
+        self._locations = locations
+        self._cache = cache
+        self._personalized = personalized
+        self._regions = regions
+
+    def get_today(self, location_id: int, preferences: OutfitPreferences) -> RegionOutfitResult:
+        """동네 기본 추천을 공유하고 개인화한 복사본만 반환"""
+        location = self._locations.get(location_id)
+        region = self._regions.resolve(location)
+        base = self._cache.get_region_today(int(region.code), region.latitude, region.longitude)
+        if preferences == OutfitPreferences():
+            return RegionOutfitResult(location, base, preferences, (), region=region)
+        generated, cache_hit = self._personalized.get(int(region.code), "today", base, preferences)
+        recommendation = generated.generated.recommendations[0]
+        return RegionOutfitResult(
+            location, replace(base, recommendation=recommendation), preferences, recommendation.reasons, generated, cache_hit, region,
+        )
+
+    def get_weekly(self, location_id: int, preferences: OutfitPreferences) -> RegionOutfitResult:
+        """주간 추천에 개인 조건을 적용하고 준비 의류도 함께 다시 구성"""
+        location = self._locations.get(location_id)
+        region = self._regions.resolve(location)
+        if preferences != OutfitPreferences():
+            self._personalized.register(int(region.code), "weekly", preferences)
+        base = self._cache.get_region_weekly(int(region.code), region.latitude, region.longitude)
+        if preferences == OutfitPreferences():
+            return RegionOutfitResult(location, base, preferences, (), region=region)
+        generated, cache_hit = self._personalized.get(int(region.code), "weekly", base, preferences)
+        daily = generated.generated.recommendations
+        adjustments = tuple(dict.fromkeys(reason for recommendation in daily for reason in recommendation.reasons))
+        result = replace(base, daily=daily, wardrobe=build_weekly_wardrobe(daily))
+        return RegionOutfitResult(location, result, preferences, adjustments, generated, cache_hit, region)
