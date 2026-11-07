@@ -14,8 +14,8 @@ from app.common.errors.handlers import handle_app_error
 from app.outfits.application.exceptions import OutfitForecastError
 from app.outfits.application.services import OutfitService
 from app.outfits.domain.models import OutfitWeather, TemperatureBasis
-from app.outfits.infrastructure.ollama_client import OllamaClient
-from app.outfits.infrastructure.ollama_recommender import OllamaOutfitRecommender
+from app.outfits.infrastructure.clients import OllamaClient
+from app.outfits.infrastructure.recommenders import OllamaOutfitRecommender
 from app.outfits.infrastructure.weather_reader import WeatherServiceReader
 from app.outfits.presentation.router import Latitude, Longitude, get_today, get_weekly
 from app.outfits.presentation.schemas import TodayOutfitResponse
@@ -42,8 +42,8 @@ def generated_content(dates: list[str], outerwear: str | None = "재킷") -> str
     """테스트에서만 사용하는 합성 LLM 응답 생성"""
     return json.dumps({"days": [{
         "date": day,
-        "best": {"top": "블루 셔츠", "bottom": "면바지", "outerwear": outerwear, "shoes": "생활방수 운동화", "accessories": ["우산"]},
-        "worst": {"top": "민소매", "bottom": "반바지", "outerwear": None, "shoes": "슬리퍼", "accessories": []},
+        "best": {"outfit_type": "separates", "one_piece": None, "top": "블루 셔츠", "bottom": "면바지", "outerwear": outerwear, "shoes": "생활방수 운동화", "accessories": ["우산"]},
+        "worst": {"outfit_type": "separates", "one_piece": None, "top": "민소매", "bottom": "반바지", "outerwear": None, "shoes": "슬리퍼", "accessories": []},
         "reasons": ["아침의 낮은 기온과 강수 가능성을 함께 고려한 구성입니다."],
         "avoid_reasons": ["얇은 옷만 입으면 아침·저녁에 추울 수 있습니다."],
         "precautions": ["외출 전 최신 예보를 확인하세요."],

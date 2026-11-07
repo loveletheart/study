@@ -1,18 +1,17 @@
-"""로컬 추천 실패 시 명시적으로 설정된 클라우드로 전환."""
+"""로컬 우선과 허용된 실패의 클라우드 전환 정책."""
 
 import logging
 from collections.abc import Callable
 from dataclasses import replace
-
 from app.outfits.application.dto import GeneratedOutfits
-from app.outfits.application.exceptions import (
-    OutfitLlmModelNotFoundError, OutfitLlmNotConfiguredError, OutfitLlmResponseError,
-    OutfitLlmTimeoutError, OutfitLlmUnavailableError,
-)
+from app.outfits.application.exceptions import OutfitLlmModelNotFoundError, OutfitLlmNotConfiguredError, OutfitLlmResponseError, OutfitLlmTimeoutError, OutfitLlmUnavailableError
 from app.outfits.application.ports import OutfitRecommender
 from app.outfits.domain.models import OutfitWeather
 
+
 logger = logging.getLogger(__name__)
+
+
 FALLBACK_ERRORS = (
     OutfitLlmNotConfiguredError, OutfitLlmModelNotFoundError, OutfitLlmUnavailableError,
     OutfitLlmTimeoutError, OutfitLlmResponseError,

@@ -24,8 +24,8 @@ from app.outfits.application.services import OutfitService
 from app.outfits.bootstrap import get_outfit_service
 from app.outfits.domain.models import TemperatureBasis
 from app.outfits.domain.rules import build_weekly_wardrobe, temperature_reference
-from app.outfits.infrastructure.ollama_client import MAX_RESPONSE_BYTES, OllamaClient
-from app.outfits.infrastructure.ollama_recommender import OllamaOutfitRecommender
+from app.outfits.infrastructure.clients import MAX_RESPONSE_BYTES, OllamaClient
+from app.outfits.infrastructure.recommenders import OllamaOutfitRecommender
 from tests import test_outfits as outfit_fixtures
 from tests.test_outfits import generated_content, weather
 
@@ -46,7 +46,20 @@ def chat_envelope(content: str = '{"days": []}', **changes) -> bytes:
 
 
 class OllamaClientTests(unittest.TestCase):
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
+    def test_sampling_overrides_preserve_explicit_zero_and_omit_unset_values(self, urlopen):
+        urlopen.return_value = http_response(chat_envelope("생성 결과"))
+        client = OllamaClient("http://localhost:11434", 180, 4096, temperature=0.5, top_p=0.8, min_p=0)
+        client.chat("qwen3:14b", [], {"type": "object"})
+        options = json.loads(urlopen.call_args.args[0].data)["options"]
+        self.assertEqual(options["temperature"], 0.5)
+        self.assertEqual(options["top_p"], 0.8)
+        self.assertEqual(options["min_p"], 0)
+        OllamaClient("http://localhost:11434", 180, 4096).chat("model", [], {})
+        options = json.loads(urlopen.call_args.args[0].data)["options"]
+        self.assertNotIn("top_p", options)
+        self.assertNotIn("min_p", options)
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_chat_sends_the_model_schema_and_non_streaming_options(self, urlopen):
         """로컬 주소·모델·스키마·추론 옵션 전달 확인"""
         urlopen.return_value = http_response(chat_envelope("생성 결과"))
@@ -63,10 +76,24 @@ class OllamaClientTests(unittest.TestCase):
         self.assertEqual(payload["format"], schema)
         self.assertIs(payload["stream"], False)
         self.assertEqual(payload["options"]["num_ctx"], 16384)
+        self.assertNotIn("think", payload)
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 180)
         urlopen.return_value.read.assert_called_once_with(MAX_RESPONSE_BYTES + 1)
 
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
+    def test_explicit_thinking_setting_is_sent_as_an_api_boolean(self, urlopen):
+        """추론 모드의 명시적 false도 생략하지 않고 API 최상위 값으로 전달한다."""
+        for thinking in (False, True):
+            with self.subTest(thinking=thinking):
+                urlopen.return_value = http_response(chat_envelope("생성 결과"))
+                OllamaClient("http://localhost:11434", 180, 4096, thinking=thinking).chat(
+                    "qwen3:14b", [{"role": "user", "content": "날씨"}], {"type": "object"},
+                )
+                payload = json.loads(urlopen.call_args.args[0].data)
+                self.assertIs(payload["think"], thinking)
+                self.assertNotIn("think", payload["options"])
+
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_connection_model_and_timeout_failures_have_public_error_codes(self, urlopen):
         """연결 실패·모델 없음·시간 초과를 공통 오류로 변환"""
         cases = [
@@ -87,7 +114,7 @@ class OllamaClientTests(unittest.TestCase):
                 self.assertEqual(response.status_code, status)
                 self.assertIsNone(json.loads(response.body)["data"])
 
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_invalid_incomplete_or_oversized_chat_responses_are_rejected(self, urlopen):
         """JSON 오류·빈 답변·생성 중단·응답 크기 초과 거부"""
         cases = [
@@ -102,7 +129,7 @@ class OllamaClientTests(unittest.TestCase):
                 with self.assertRaises(OutfitLlmResponseError):
                     OllamaClient("http://localhost:11434", 1, 4096).chat("model", [], {})
 
-    @patch("app.outfits.infrastructure.ollama_client.urlopen")
+    @patch("app.outfits.infrastructure.clients.urlopen")
     def test_server_error_body_is_not_exposed_to_the_caller(self, urlopen):
         """서버 오류의 내부 문자열을 공개 응답에서 제외"""
         urlopen.return_value = http_response(b'{"error":"private filesystem path"}')
@@ -280,6 +307,32 @@ class LlmSettingsTests(unittest.TestCase):
         self.assertEqual(settings.llm_model, "")
         self.assertEqual(settings.llm_timeout_seconds, 180)
         self.assertEqual(settings.llm_context_size, 16384)
+        self.assertIsNone(settings.llm_thinking)
+
+    def test_sampling_settings_allow_zero_and_reject_invalid_probabilities(self):
+        self.dotenv.return_value = {"STUDY_LLM_TEMPERATURE": "0", "STUDY_LLM_TOP_P": "0.8", "STUDY_LLM_MIN_P": "0"}
+        settings = get_settings()
+        self.assertEqual(settings.llm_temperature, 0)
+        self.assertEqual(settings.llm_top_p, 0.8)
+        self.assertEqual(settings.llm_min_p, 0)
+        for key, value in (("STUDY_LLM_TOP_P", "1.1"), ("STUDY_LLM_MIN_P", "-0.1"),
+                           ("STUDY_LLM_TEMPERATURE", "nan"), ("STUDY_LLM_TOP_P", "invalid")):
+            self.dotenv.return_value = {key: value}
+            get_settings.cache_clear()
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                get_settings()
+
+    def test_optional_thinking_setting_preserves_server_default_and_explicit_false(self):
+        """미지정은 서버 기본값, 명시한 true/false는 해당 값으로 읽고 오타는 거부한다."""
+        for raw, expected in (("", None), ("false", False), ("true", True)):
+            with self.subTest(raw=raw):
+                self.dotenv.return_value = {"STUDY_LLM_THINKING": raw}
+                get_settings.cache_clear()
+                self.assertIs(get_settings().llm_thinking, expected)
+        self.dotenv.return_value = {"STUDY_LLM_THINKING": "offf"}
+        get_settings.cache_clear()
+        with self.assertRaises(ValueError):
+            get_settings()
 
     def test_dotenv_overrides_environment_and_keeps_the_exact_model_name(self):
         """파일의 모델명을 우선하고 없는 접속 설정은 환경변수에서 읽기"""

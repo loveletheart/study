@@ -14,8 +14,8 @@ from app.outfits.application.exceptions import (
     OutfitCloudAuthError, OutfitCloudNotConfiguredError, OutfitCloudRateLimitError,
     OutfitCloudResponseError, OutfitCloudTimeoutError, OutfitCloudUnavailableError,
 )
-from app.outfits.infrastructure.gemini_client import MAX_RESPONSE_BYTES, GeminiClient
-from app.outfits.infrastructure.gemini_recommender import GeminiOutfitRecommender
+from app.outfits.infrastructure.clients import MAX_RESPONSE_BYTES, GeminiClient
+from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender
 from tests.test_outfits import generated_content, weather
 
 
@@ -35,7 +35,7 @@ def gemini_response(text: str = '{"days": []}', **changes) -> types.GenerateCont
 class GeminiClientTests(unittest.TestCase):
     def setUp(self):
         """네트워크 호출 대신 공식 SDK 클라이언트의 생성 경계를 대체한다."""
-        factory = patch("app.outfits.infrastructure.gemini_client.genai.Client")
+        factory = patch("app.outfits.infrastructure.clients.genai.Client")
         self.factory = factory.start()
         self.addCleanup(factory.stop)
         self.sdk = self.factory.return_value.__enter__.return_value
@@ -82,7 +82,7 @@ class GeminiClientTests(unittest.TestCase):
             with self.subTest(code=code):
                 self.generate.reset_mock()
                 self.generate.side_effect = errors.APIError(code, {"error": {"message": "private test-key"}})
-                with self.assertLogs("app.outfits.infrastructure.gemini_client", level="WARNING") as logs:
+                with self.assertLogs("app.outfits.infrastructure.clients", level="WARNING") as logs:
                     with self.assertRaises(expected) as caught:
                         self.client.chat("gemini-flash-latest", [{"role": "user", "content": "날씨"}], {})
                 response = handle_app_error(Request({"type": "http"}), caught.exception)
@@ -103,7 +103,7 @@ class GeminiClientTests(unittest.TestCase):
         ]:
             with self.subTest(error=type(error)):
                 self.generate.side_effect = error
-                with self.assertLogs("app.outfits.infrastructure.gemini_client", level="WARNING") as logs:
+                with self.assertLogs("app.outfits.infrastructure.clients", level="WARNING") as logs:
                     with self.assertRaises(expected):
                         self.client.chat("gemini-flash-latest", [{"role": "user", "content": "날씨"}], {})
                 self.assertNotIn("test-key", " ".join(logs.output))
@@ -113,7 +113,7 @@ class GeminiClientTests(unittest.TestCase):
         for reason in ["API_KEY_INVALID", "API_KEY_EXPIRED"]:
             with self.subTest(reason=reason):
                 self.generate.side_effect = errors.APIError(400, {"error": {"details": [{"reason": reason}]}})
-                with self.assertLogs("app.outfits.infrastructure.gemini_client", level="WARNING"):
+                with self.assertLogs("app.outfits.infrastructure.clients", level="WARNING"):
                     with self.assertRaises(OutfitCloudAuthError):
                         self.client.chat("gemini-flash-latest", [{"role": "user", "content": "날씨"}], {})
 
@@ -132,7 +132,7 @@ class GeminiClientTests(unittest.TestCase):
         for error, expected in cases:
             with self.subTest(expected=expected):
                 self.generate.side_effect = error
-                with self.assertLogs("app.outfits.infrastructure.gemini_client", level="WARNING"):
+                with self.assertLogs("app.outfits.infrastructure.clients", level="WARNING"):
                     with self.assertRaises(OutfitCloudUnavailableError) as caught:
                         self.client.chat("gemini-flash-latest", [{"role": "user", "content": "날씨"}], {})
                 response = handle_app_error(Request({"type": "http"}), caught.exception)
@@ -153,7 +153,7 @@ class GeminiClientTests(unittest.TestCase):
         ]:
             with self.subTest(stage=stage):
                 self.generate.side_effect = error
-                with self.assertLogs("app.outfits.infrastructure.gemini_client", level="WARNING"):
+                with self.assertLogs("app.outfits.infrastructure.clients", level="WARNING"):
                     with self.assertRaises(OutfitCloudTimeoutError) as caught:
                         self.client.chat("gemini-flash-latest", [{"role": "user", "content": "날씨"}], {})
                 response = handle_app_error(Request({"type": "http"}), caught.exception)
@@ -168,7 +168,7 @@ class GeminiClientTests(unittest.TestCase):
     def test_server_deadline_is_distinct_from_client_timeout(self):
         """Google 서버가 반환한 처리 시간 초과에는 HTTP 상태를 표시한다."""
         self.generate.side_effect = errors.APIError(504, {"error": {"status": "DEADLINE_EXCEEDED"}})
-        with self.assertLogs("app.outfits.infrastructure.gemini_client", level="WARNING"):
+        with self.assertLogs("app.outfits.infrastructure.clients", level="WARNING"):
             with self.assertRaises(OutfitCloudTimeoutError) as caught:
                 self.client.chat("gemini-flash-latest", [{"role": "user", "content": "날씨"}], {})
         self.assertIn("HTTP 504", caught.exception.message)
@@ -235,7 +235,7 @@ class GeminiClientTests(unittest.TestCase):
 
         self.factory.side_effect = create_sdk
         schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
-        with self.assertLogs("app.outfits.infrastructure.gemini_client", level="WARNING"):
+        with self.assertLogs("app.outfits.infrastructure.clients", level="WARNING"):
             with self.assertRaises(OutfitCloudUnavailableError):
                 self.client.chat("gemini-flash-latest", [{"role": "user", "content": "날씨"}], schema)
         self.assertEqual(len(requests), 1)

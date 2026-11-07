@@ -15,9 +15,13 @@
 | `infrastructure/open_meteo.py` | 외부 파라미터 구성, 단위·날짜·누락 검사, 도메인 변환 |
 | `infrastructure/http_client.py` | HTTPS JSON 요청, 타임아웃과 응답 크기 제한 |
 | `infrastructure/cache.py` | 최대 128개 항목의 프로세스 내 TTL 캐시 |
+| `infrastructure/location_catalog.py` | 검색에서 확인한 국내 지역 식별자·대표 좌표를 SQLite에 보관 |
+| `infrastructure/sigungu_resolver.py` | 검색 좌표를 브이월드 공식 시군구 경계에 조회하고 코드별 고정 대표점 저장 |
 | `bootstrap.py` | 외부 클라이언트와 캐시를 Service에 연결 |
 
-Router가 Service를 호출하면 Service는 WeatherProvider 인터페이스를 사용합니다. 실제 Open-Meteo 어댑터는 bootstrap에서 주입합니다. Domain과 Application은 FastAPI와 urllib을 import하지 않습니다. 날씨 조회에는 DB 저장이나 트랜잭션이 필요하지 않아 Repository와 Unit of Work를 만들지 않습니다.
+Router가 Service를 호출하면 Service는 WeatherProvider 인터페이스를 사용합니다. 실제 Open-Meteo 어댑터는 bootstrap에서 주입합니다. Domain과 Application은 FastAPI와 urllib을 import하지 않습니다. 예보 조회 자체에는 DB 트랜잭션이 없으며, 지역 검색 결과는 별도의 LocationCatalog 계약으로 SQLite에 저장해 동네별 추천이 검증한 대표 좌표를 재사용할 수 있게 합니다. 지역 `id`는 GeoNames 식별자이며 공식 한국 행정동 코드가 아닙니다.
+
+옷차림의 시군구 공유는 검색 좌표를 브이월드 `LT_C_ADSIGG_INFO`에 조회한 `sig_cd`로 결정합니다. 같은 시군구 코드는 최초로 확인한 내부 좌표를 고정 대표점으로 사용하며 단순 반올림이나 이름 유사도로 묶지 않습니다. 시군구 판정은 키가 필요한 별도 기능이고, 기존 좌표 기반 날씨 API는 브이월드 키 없이 그대로 사용할 수 있습니다.
 
 ## API 사용
 

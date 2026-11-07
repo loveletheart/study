@@ -2,6 +2,12 @@ from app.common.errors.codes import ErrorCode
 from app.common.errors.exceptions import AppError
 
 
+class WeeklyOutfitNotReadyError(AppError):
+    """주간 조회에서 즉석 추론하지 않고 배치 준비 상태를 알린다."""
+
+    error_code = ErrorCode.OUTFIT_WEEKLY_NOT_READY
+
+
 class OutfitForecastError(AppError):
     """추천에 필요한 날짜나 날씨 정보가 올바르지 않음."""
 

@@ -1,20 +1,89 @@
-"""Google GenAI 공식 SDK로 구조화된 옷차림 응답을 요청한다."""
+"""Ollama와 Gemini의 모델 호출 및 통신 오류 처리."""
 
-import logging
-import math
-import re
+import json, logging, math, re, httpx
+from http.client import HTTPException
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+from app.outfits.application.exceptions import OutfitLlmModelNotFoundError, OutfitLlmResponseError, OutfitLlmTimeoutError, OutfitLlmUnavailableError, OutfitCloudAuthError, OutfitCloudNotConfiguredError, OutfitCloudRateLimitError, OutfitCloudResponseError, OutfitCloudTimeoutError, OutfitCloudUnavailableError
 from time import perf_counter
-
-import httpx
 from google import genai
 from google.genai import errors, types
 
-from app.outfits.application.exceptions import (
-    OutfitCloudAuthError, OutfitCloudNotConfiguredError, OutfitCloudRateLimitError,
-    OutfitCloudResponseError, OutfitCloudTimeoutError, OutfitCloudUnavailableError,
-)
 
 MAX_RESPONSE_BYTES = 1_048_576
+
+
+class OllamaClient:
+    def __init__(
+        self, base_url: str, timeout_seconds: float, context_size: int,
+        today_context_size: int | None = None, thinking: bool | None = None,
+        *, temperature: float = 0.3, top_p: float | None = None, min_p: float | None = None,
+    ) -> None:
+        """로컬 서버 주소와 추론 제한 설정"""
+        self._url = base_url.rstrip("/") + "/api/chat"
+        self._timeout_seconds = timeout_seconds
+        self._context_size = context_size
+        self._today_context_size = today_context_size
+        self._thinking = thinking
+        self._sampling = {"temperature": temperature}
+        if top_p is not None:
+            self._sampling["top_p"] = top_p
+        if min_p is not None:
+            self._sampling["min_p"] = min_p
+
+    def chat(self, model: str, messages: list[dict[str, str]], schema: dict) -> str:
+        """JSON 스키마를 지정해 단일 비스트리밍 응답 조회"""
+        is_today = schema.get("properties", {}).get("days", {}).get("maxItems") == 1
+        context_size = self._today_context_size if is_today and self._today_context_size is not None else self._context_size
+        max_output = min(8192, context_size // 2) if is_today and self._today_context_size is not None else 8192
+        payload = {
+            "model": model, "messages": messages, "format": schema, "stream": False,
+            "options": {**self._sampling, "num_predict": max_output, "num_ctx": context_size},
+        }
+        if self._thinking is not None:
+            payload["think"] = self._thinking
+        request = Request(
+            self._url, data=json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Accept": "application/json"}, method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self._timeout_seconds) as response:
+                body = response.read(MAX_RESPONSE_BYTES + 1)
+        except HTTPError as exc:
+            exc.close()
+            if exc.code == 404:
+                raise OutfitLlmModelNotFoundError() from exc
+            raise OutfitLlmUnavailableError() from exc
+        except TimeoutError as exc:
+            raise OutfitLlmTimeoutError() from exc
+        except URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                raise OutfitLlmTimeoutError() from exc
+            raise OutfitLlmUnavailableError() from exc
+        except (OSError, HTTPException) as exc:
+            raise OutfitLlmUnavailableError() from exc
+        if len(body) > MAX_RESPONSE_BYTES:
+            raise OutfitLlmResponseError()
+        try:
+            envelope = json.loads(body)
+        except (ValueError, UnicodeDecodeError, RecursionError) as exc:
+            raise OutfitLlmResponseError() from exc
+        if not isinstance(envelope, dict):
+            raise OutfitLlmResponseError()
+        if envelope.get("error"):
+            raise OutfitLlmUnavailableError()
+        message = envelope.get("message")
+        if (
+            envelope.get("done") is not True or envelope.get("done_reason") == "length"
+            or not isinstance(message, dict) or message.get("role") != "assistant"
+        ):
+            raise OutfitLlmResponseError()
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise OutfitLlmResponseError()
+        return content
+
+
 logger = logging.getLogger(__name__)
 
 

@@ -18,11 +18,13 @@ class ErrorCode(str, Enum):
     USER_DUPLICATE_EMAIL = "USER_DUPLICATE_EMAIL"
     USER_NOT_FOUND = "USER_NOT_FOUND"
     WEATHER_INVALID_QUERY = "WEATHER_INVALID_QUERY"
+    WEATHER_REGION_NOT_CONFIGURED = "WEATHER_REGION_NOT_CONFIGURED"
     WEATHER_UNAVAILABLE = "WEATHER_UNAVAILABLE"
     WEATHER_TIMEOUT = "WEATHER_TIMEOUT"
     WEATHER_INVALID_RESPONSE = "WEATHER_INVALID_RESPONSE"
     WEATHER_RATE_LIMITED = "WEATHER_RATE_LIMITED"
     OUTFIT_INVALID_FORECAST = "OUTFIT_INVALID_FORECAST"
+    OUTFIT_WEEKLY_NOT_READY = "OUTFIT_WEEKLY_NOT_READY"
     OUTFIT_LLM_NOT_CONFIGURED = "OUTFIT_LLM_NOT_CONFIGURED"
     OUTFIT_LLM_UNAVAILABLE = "OUTFIT_LLM_UNAVAILABLE"
     OUTFIT_LLM_MODEL_NOT_FOUND = "OUTFIT_LLM_MODEL_NOT_FOUND"
@@ -55,6 +57,7 @@ ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
     ErrorCode.USER_DUPLICATE_EMAIL: ErrorSpec(409, "이미 등록된 이메일입니다."),
     ErrorCode.USER_NOT_FOUND: ErrorSpec(404, "사용자를 찾을 수 없습니다."),
     ErrorCode.WEATHER_INVALID_QUERY: ErrorSpec(422, "날씨 조회 조건을 확인해 주세요."),
+    ErrorCode.WEATHER_REGION_NOT_CONFIGURED: ErrorSpec(503, "시군구 경계 조회를 위해 VWORLD_API_KEY를 로컬 설정에 입력해 주세요."),
     
     # 500번대 오류는 서버 내부 문제이므로, 클라이언트에게는 503 또는 504로 안내하고, 실제 서버 로그에서 원인을 확인하도록 유도합니다.
     ErrorCode.WEATHER_UNAVAILABLE: ErrorSpec(503, "날씨 제공 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."),
@@ -62,6 +65,7 @@ ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
     ErrorCode.WEATHER_INVALID_RESPONSE: ErrorSpec(502, "날씨 제공 서비스의 응답 형식 또는 데이터가 올바르지 않습니다."),
     ErrorCode.WEATHER_RATE_LIMITED: ErrorSpec(503, "날씨 제공 서비스의 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요."),
     ErrorCode.OUTFIT_INVALID_FORECAST: ErrorSpec(502, "옷차림 추천에 필요한 날씨 정보가 올바르지 않습니다."),
+    ErrorCode.OUTFIT_WEEKLY_NOT_READY: ErrorSpec(503, "주간 추천이 아직 준비되지 않았습니다. 매일 새벽 배치가 완료된 뒤 다시 조회해 주세요."),
     ErrorCode.OUTFIT_LLM_NOT_CONFIGURED: ErrorSpec(503, "STUDY_LLM_MODEL에 사용할 로컬 모델명을 설정해 주세요."),
     ErrorCode.OUTFIT_LLM_UNAVAILABLE: ErrorSpec(503, "로컬 LLM 서버에 연결하거나 추천을 생성할 수 없습니다."),
     ErrorCode.OUTFIT_LLM_MODEL_NOT_FOUND: ErrorSpec(503, "설정한 모델을 로컬 LLM 서버에서 찾을 수 없습니다."),

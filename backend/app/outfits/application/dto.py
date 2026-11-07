@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from app.outfits.domain.models import OutfitRecommendation, OutfitWeather, WeeklyWardrobe
+from app.outfits.domain.models import OutfitPreferences
+from app.weather.domain.models import Location, SigunguRegion
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,8 @@ class TodayOutfitResult:
     forecast: OutfitForecast
     recommendation: OutfitRecommendation
     engine: RecommendationEngine
+    generated_at: datetime | None = None
+    base_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -50,3 +54,24 @@ class WeeklyOutfitResult:
     wardrobe: WeeklyWardrobe
     summary: str
     engine: RecommendationEngine
+    generated_at: datetime | None = None
+    base_version: str | None = None
+
+
+@dataclass(frozen=True)
+class RegionOutfitResult:
+    location: Location
+    result: TodayOutfitResult | WeeklyOutfitResult
+    preferences: OutfitPreferences
+    adjustments: tuple[str, ...]
+    personalization: "PersonalizedOutfits | None" = None
+    personalization_cache_hit: bool = False
+    region: SigunguRegion | None = None
+
+
+@dataclass(frozen=True)
+class PersonalizedOutfits:
+    generated: GeneratedOutfits
+    generated_at: datetime
+    version: str
+    base_version: str

@@ -22,6 +22,11 @@ class Settings:
     llm_model: str = ""
     llm_timeout_seconds: float = 180.0
     llm_context_size: int = 16384
+    llm_today_context_size: int = 4096
+    llm_thinking: bool | None = None
+    llm_temperature: float = 0.3
+    llm_top_p: float | None = None
+    llm_min_p: float | None = None
     cloud_fallback_enabled: bool = False
     fallback_local_timeout_seconds: float | None = None
     gemini_api_key: str = field(default="", repr=False)
@@ -29,6 +34,11 @@ class Settings:
     gemini_timeout_seconds: float = 60.0
     gemini_max_output_tokens: int = 8192
     outfit_refresh_seconds: float = 3600.0
+    outfit_cache_max_entries: int = 4096
+    outfit_weekly_batch_hour: int = 1
+    outfit_weekly_max_age_seconds: float = 172800.0
+    vworld_api_key: str = field(default="", repr=False)
+    vworld_domain: str = ""
 
 
 def _number_setting(values: dict, key: str, default: float, minimum: float, maximum: float) -> float:
@@ -62,6 +72,13 @@ def _integer_setting(values: dict, key: str, default: int, minimum: int, maximum
     return int(value)
 
 
+def _optional_probability(values: dict, key: str) -> float | None:
+    raw = values.get(key)
+    if raw is None or not str(raw).strip():
+        return None
+    return _number_setting(values, key, 0, 0, 1)
+
+
 def _boolean_setting(values: dict, key: str, default: bool = False) -> bool:
     """명시적으로 지정한 불리언 설정 검증"""
     raw = str(values.get(key) or str(default)).strip().lower()
@@ -87,6 +104,14 @@ def get_settings() -> Settings:
         llm_model=(values.get("STUDY_LLM_MODEL") or "").strip(),
         llm_timeout_seconds=_number_setting(values, "STUDY_LLM_TIMEOUT_SECONDS", 180, 1, 600),
         llm_context_size=_integer_setting(values, "STUDY_LLM_CONTEXT_SIZE", 16384, 2048, 131072),
+        llm_today_context_size=_integer_setting(values, "STUDY_LLM_TODAY_CONTEXT_SIZE", 4096, 2048, 131072),
+        llm_thinking=(
+            _boolean_setting(values, "STUDY_LLM_THINKING")
+            if str(values.get("STUDY_LLM_THINKING") or "").strip() else None
+        ),
+        llm_temperature=_number_setting(values, "STUDY_LLM_TEMPERATURE", 0.3, 0, 2),
+        llm_top_p=_optional_probability(values, "STUDY_LLM_TOP_P"),
+        llm_min_p=_optional_probability(values, "STUDY_LLM_MIN_P"),
         cloud_fallback_enabled=_boolean_setting(values, "STUDY_LLM_CLOUD_FALLBACK_ENABLED"),
         fallback_local_timeout_seconds=(
             _number_setting(values, "STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS", 180, 1, 600)
@@ -97,4 +122,9 @@ def get_settings() -> Settings:
         gemini_timeout_seconds=_number_setting(values, "STUDY_GEMINI_TIMEOUT_SECONDS", 60, 1, 300),
         gemini_max_output_tokens=_integer_setting(values, "STUDY_GEMINI_MAX_OUTPUT_TOKENS", 8192, 128, 32768),
         outfit_refresh_seconds=_number_setting(values, "STUDY_OUTFIT_REFRESH_SECONDS", 3600, 60, 86400),
+        outfit_cache_max_entries=_integer_setting(values, "STUDY_OUTFIT_CACHE_MAX_ENTRIES", 4096, 1, 100000),
+        outfit_weekly_batch_hour=_integer_setting(values, "STUDY_OUTFIT_WEEKLY_BATCH_HOUR", 1, 0, 23),
+        outfit_weekly_max_age_seconds=_number_setting(values, "STUDY_OUTFIT_WEEKLY_MAX_AGE_SECONDS", 172800, 86400, 604800),
+        vworld_api_key=(values.get("VWORLD_API_KEY") or "").strip(),
+        vworld_domain=(values.get("STUDY_VWORLD_DOMAIN") or "").strip(),
     )

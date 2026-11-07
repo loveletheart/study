@@ -12,10 +12,10 @@ from app.outfits.application.exceptions import (
     OutfitCloudRateLimitError, OutfitLlmModelNotFoundError, OutfitLlmNotConfiguredError,
     OutfitLlmResponseError, OutfitLlmTimeoutError, OutfitLlmUnavailableError,
 )
-from app.outfits.application.fallback import FallbackOutfitRecommender
+from app.outfits.application.policies import FallbackOutfitRecommender
 from app.outfits.application.services import OutfitService
 from app.outfits.bootstrap import get_outfit_service
-from app.outfits.infrastructure.gemini_recommender import GeminiOutfitRecommender
+from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender
 from app.outfits.presentation.router import get_today, get_weekly
 from app.weather.application.exceptions import WeatherProviderTimeoutError
 from tests import test_outfits as outfit_fixtures
@@ -49,7 +49,7 @@ class FallbackTests(unittest.TestCase):
                 self.local.side_effect = error()
                 self.cloud.reset_mock()
                 self.fixture.llm.chat.reset_mock()
-                with self.assertLogs("app.outfits.application.fallback", level="WARNING"):
+                with self.assertLogs("app.outfits.application.policies", level="WARNING"):
                     result = self.recommender.recommend(self.forecast.days)
                 self.assertEqual(result.engine.provider, "gemini")
                 self.assertTrue(result.engine.fallback_used)
@@ -73,7 +73,7 @@ class FallbackTests(unittest.TestCase):
         cloud = Mock()
         cloud.recommend.side_effect = OutfitCloudRateLimitError()
         self.cloud.return_value = cloud
-        with self.assertLogs("app.outfits.application.fallback", level="WARNING"):
+        with self.assertLogs("app.outfits.application.policies", level="WARNING"):
             with self.assertRaises(OutfitCloudRateLimitError):
                 self.recommender.recommend(self.forecast.days)
         self.local.assert_called_once()
@@ -86,7 +86,7 @@ class FallbackTests(unittest.TestCase):
         local.recommend.side_effect = OutfitLlmTimeoutError()
         self.local.return_value = local
         service = OutfitService(self.fixture.reader, self.recommender)
-        with self.assertLogs("app.outfits.application.fallback", level="WARNING"):
+        with self.assertLogs("app.outfits.application.policies", level="WARNING"):
             today = get_today(37, 127, service).model_dump(mode="json")
             weekly = get_weekly(37, 127, service).model_dump(mode="json")
         for response in [today, weekly]:
@@ -118,13 +118,13 @@ class FallbackTests(unittest.TestCase):
                 self.subTest(route=route.__name__),
                 patch("app.outfits.bootstrap.get_settings", return_value=settings),
                 patch("app.outfits.bootstrap.get_weather_service", return_value=self.fixture.weather_service),
-                patch("app.outfits.infrastructure.ollama_client.urlopen", side_effect=URLError("connection refused")) as local,
-                patch("app.outfits.infrastructure.gemini_client.genai.Client") as sdk,
+                patch("app.outfits.infrastructure.clients.urlopen", side_effect=URLError("connection refused")) as local,
+                patch("app.outfits.infrastructure.clients.genai.Client") as sdk,
             ):
                 content = outfit_fixtures.generated_content([day.date.isoformat() for day in days])
                 cloud = sdk.return_value.__enter__.return_value.models.generate_content
                 cloud.return_value = gemini_response(content)
-                with self.assertLogs("app.outfits.application.fallback", level="WARNING"):
+                with self.assertLogs("app.outfits.application.policies", level="WARNING"):
                     response = route(37, 127, get_outfit_service()).model_dump(mode="json")
                 self.assertEqual(response["code"], "SUCCESS")
                 engine = response["data"]["engine"]

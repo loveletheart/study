@@ -1,6 +1,7 @@
 """기상 API와 웹 프레임워크에 의존하지 않는 날씨 데이터와 요약 규칙."""
 
 from dataclasses import dataclass
+import re
 from datetime import date, datetime, timedelta, timezone
 from math import isfinite
 
@@ -41,6 +42,21 @@ class Location:
     admin1: str | None = None
     admin2: str | None = None
     timezone: str | None = None
+
+
+@dataclass(frozen=True)
+class SigunguRegion:
+    code: str
+    name: str
+    latitude: float
+    longitude: float
+    source: str = "VWorld LT_C_ADSIGG_INFO"
+
+    def __post_init__(self) -> None:
+        """공식 시군구 코드 형식과 대표 좌표 검증"""
+        if not re.fullmatch(r"[0-9]{5}", self.code) or not self.name.strip():
+            raise ValueError("Invalid sigungu region")
+        Coordinates(self.latitude, self.longitude)
 
 
 class WeatherDescription:
