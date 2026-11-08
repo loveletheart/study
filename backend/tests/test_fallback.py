@@ -1,6 +1,7 @@
 """유료 호출 없이 로컬 우선 정책과 클라우드 자동 전환 확인."""
 
 # 표준 라이브러리
+import json
 import os
 import unittest
 from dataclasses import replace
@@ -20,12 +21,15 @@ from app.outfits.application.exceptions import (
 )
 from app.outfits.application.policies import FallbackOutfitRecommender
 from app.outfits.application.services import OutfitService
-from app.outfits.bootstrap import get_outfit_service
-from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender
+from app.outfits.bootstrap import _personal_recommender, get_outfit_service
+from app.outfits.domain.models import OutfitPreferences, OutfitStyle
+from app.outfits.infrastructure.prompts import PERSONALIZATION_VERSION
+from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender, LlmOutfitPersonalizer
 from app.outfits.presentation.router import get_today, get_weekly
 from app.weather.application.exceptions import WeatherProviderTimeoutError
 from tests import test_outfits as outfit_fixtures
 from tests.test_gemini import gemini_response
+from tests.test_ollama import chat_envelope, http_response
 
 
 class FallbackTests(unittest.TestCase):
@@ -167,6 +171,63 @@ class FallbackTests(unittest.TestCase):
                 service.get_today(37, 127)
                 local.assert_called_once_with(settings.return_value, expected_timeout)
                 cloud.assert_not_called()
+
+    def test_personal_local_requests_keep_preferences_options_and_timeout_without_cloud(self):
+        """개인화에서도 설정한 문맥·샘플링·대기 제한과 조건을 전달하고 유료 호출을 생략한다."""
+        base = self.fixture.recommender.recommend(self.forecast.days[:1])
+        preferences = OutfitPreferences(style=OutfitStyle.FORMAL)
+        content = outfit_fixtures.generated_content([self.forecast.days[0].date.isoformat()])
+        for enabled, fallback_timeout, expected_timeout in [(False, 15, 180), (True, 15, 15), (True, 300, 180)]:
+            settings = Settings(
+                "test", Path("unused.db"), llm_model="local-model", cloud_fallback_enabled=enabled,
+                fallback_local_timeout_seconds=fallback_timeout, llm_thinking=False, llm_top_p=0.8, llm_min_p=0,
+            )
+            with (
+                self.subTest(enabled=enabled, fallback_timeout=fallback_timeout),
+                patch("app.outfits.bootstrap.get_settings", return_value=settings),
+                patch("app.outfits.infrastructure.clients.urlopen", return_value=http_response(chat_envelope(content))) as local,
+                patch("app.outfits.bootstrap.GeminiClient") as cloud,
+            ):
+                result = LlmOutfitPersonalizer(_personal_recommender).personalize(base, preferences)
+                payload = json.loads(local.call_args.args[0].data)
+                self.assertEqual(local.call_args.kwargs["timeout"], expected_timeout)
+                self.assertEqual(payload["options"], {
+                    "temperature": 0.3, "top_p": 0.8, "min_p": 0, "num_predict": 2048, "num_ctx": 4096,
+                })
+                self.assertFalse(payload["think"])
+                self.assertEqual(json.loads(payload["messages"][1]["content"])["preferences"]["style"], "formal")
+                self.assertEqual(result.engine.prompt_version, PERSONALIZATION_VERSION)
+                self.assertFalse(result.engine.fallback_used)
+                cloud.assert_not_called()
+
+    def test_personal_local_failure_calls_cloud_once_with_preferences_and_fallback_metadata(self):
+        """로컬 개인화 실패 시 같은 조건을 SDK로 한 번 전달하고 전환 정보를 보존한다."""
+        base = self.fixture.recommender.recommend(self.forecast.days[:1])
+        preferences = OutfitPreferences(style=OutfitStyle.FORMAL)
+        settings = Settings(
+            "test", Path("unused.db"), llm_model="local-model", cloud_fallback_enabled=True,
+            gemini_api_key="test-key", gemini_model="cloud-model", fallback_local_timeout_seconds=15,
+        )
+        with (
+            patch("app.outfits.bootstrap.get_settings", return_value=settings),
+            patch("app.outfits.infrastructure.clients.urlopen", side_effect=URLError("connection refused")) as local,
+            patch("app.outfits.infrastructure.clients.genai.Client") as sdk,
+        ):
+            cloud = sdk.return_value.__enter__.return_value.models.generate_content
+            cloud.return_value = gemini_response(outfit_fixtures.generated_content([self.forecast.days[0].date.isoformat()]))
+            with self.assertLogs("app.outfits.application.policies", level="WARNING"):
+                result = LlmOutfitPersonalizer(_personal_recommender).personalize(base, preferences)
+            local.assert_called_once()
+            self.assertEqual(local.call_args.kwargs["timeout"], 15)
+            cloud.assert_called_once()
+            content = json.loads(cloud.call_args.kwargs["contents"][0].parts[0].text)
+            self.assertEqual(content["preferences"]["style"], "formal")
+            self.assertEqual(result.recommendations[0].weather, base.recommendations[0].weather)
+            self.assertEqual(result.engine.provider, "gemini")
+            self.assertEqual(result.engine.model, "cloud-model")
+            self.assertEqual(result.engine.prompt_version, PERSONALIZATION_VERSION)
+            self.assertTrue(result.engine.fallback_used)
+            self.assertEqual(result.engine.fallback_reason, "OUTFIT_LLM_UNAVAILABLE")
 
 
 class CloudSettingsTests(unittest.TestCase):

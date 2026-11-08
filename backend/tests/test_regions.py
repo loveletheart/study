@@ -75,7 +75,7 @@ class RegionTests(unittest.TestCase):
             return json.dumps(generated, ensure_ascii=False)
 
         self.personal_llm.chat.side_effect = personal_content
-        self.personalizer = LlmOutfitPersonalizer(lambda base, preferences: StructuredOutfitRecommender(
+        self.personalizer = LlmOutfitPersonalizer(lambda preferences: StructuredOutfitRecommender(
             PersonalizationChatClient(self.personal_llm, preferences), "test-personal-model", "ollama",
         ))
         self.personal_cache = SQLitePersonalizedOutfitCache(

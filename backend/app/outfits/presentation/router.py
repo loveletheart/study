@@ -1,14 +1,10 @@
 """좌표·시군구 오늘/주간 옷차림 API를 한 라우터에서 관리한다."""
 
-# 외부 라이브러리
-
 # 표준 라이브러리
 from typing import Annotated
 
 # 외부 라이브러리
 from fastapi import APIRouter, Depends, Query, Path
-
-# 프로젝트 모듈
 
 # 프로젝트 모듈
 from app.common.errors.codes import ErrorCode

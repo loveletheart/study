@@ -186,7 +186,7 @@ class CachedOutfitService:
         cached = self._read(key)
         if cached is not None:
             return cached
-        if self._weekly_batch_only and kind.rsplit(":", 1)[-1] == "weekly":
+        if self._weekly_batch_only and kind == "weekly":
             raise WeeklyOutfitNotReadyError()
         with self._lock_for(key):
             cached = self._read(key)

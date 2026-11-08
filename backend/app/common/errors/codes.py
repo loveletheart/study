@@ -2,15 +2,12 @@
 
 
 # 표준 라이브러리
-
-# 표준 라이브러리
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 from typing import Mapping
 
 
-# 오류 코드
 # 오류 코드
 class ErrorCode(str, Enum):
     """클라이언트가 오류 종류를 구분하는 안정적인 식별자."""
@@ -45,7 +42,6 @@ class ErrorCode(str, Enum):
 
 
 # 오류 명세 모델
-# 오류 명세 모델
 @dataclass(frozen=True)
 class ErrorSpec:
     """오류 코드에 대응하는 기본 HTTP 상태와 사용자 안내 메시지."""
@@ -55,9 +51,7 @@ class ErrorSpec:
 
 
 # 오류별 HTTP 상태와 기본 메시지: 위의 코드·명세 타입 정의 후 생성
-# 오류별 HTTP 상태와 기본 메시지: 위의 코드·명세 타입 정의 후 생성
 ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
-    # 400번대 오류는 클라이언트 문제이므로, 클라이언트에게 안내 메시지를 전달합니다.
     ErrorCode.COMMON_INVALID_REQUEST: ErrorSpec(422, "요청 입력값을 확인해 주세요."),
     ErrorCode.COMMON_NOT_FOUND: ErrorSpec(404, "요청한 API 경로를 찾을 수 없습니다."),
     ErrorCode.COMMON_METHOD_NOT_ALLOWED: ErrorSpec(405, "허용되지 않은 HTTP 요청 방식입니다."),
@@ -69,7 +63,6 @@ ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
     ErrorCode.WEATHER_INVALID_QUERY: ErrorSpec(422, "날씨 조회 조건을 확인해 주세요."),
     ErrorCode.WEATHER_REGION_NOT_CONFIGURED: ErrorSpec(503, "시군구 경계 조회를 위해 VWORLD_API_KEY를 로컬 설정에 입력해 주세요."),
     
-    # 500번대 오류는 서버 내부 문제이므로, 클라이언트에게는 503 또는 504로 안내하고, 실제 서버 로그에서 원인을 확인하도록 유도합니다.
     ErrorCode.WEATHER_UNAVAILABLE: ErrorSpec(503, "날씨 제공 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."),
     ErrorCode.WEATHER_TIMEOUT: ErrorSpec(504, "날씨 제공 서비스의 응답 시간이 초과되었습니다."),
     ErrorCode.WEATHER_INVALID_RESPONSE: ErrorSpec(502, "날씨 제공 서비스의 응답 형식 또는 데이터가 올바르지 않습니다."),

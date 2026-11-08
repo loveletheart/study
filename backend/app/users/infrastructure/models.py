@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS users (
 """
 
 
-# 검증 테스트
 def user_from_row(row: sqlite3.Row) -> User:
     """DB 조회 행을 사용자 객체로 변환"""
     return User(id=UUID(row["id"]), name=row["name"], email=row["email"])

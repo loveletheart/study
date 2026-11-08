@@ -6,7 +6,6 @@ from functools import lru_cache
 # 프로젝트 모듈
 from app.common.config import Settings, get_settings
 from app.outfits.application.policies import FallbackOutfitRecommender
-from app.outfits.application.dto import GeneratedOutfits
 from app.outfits.application.ports import OutfitRecommender
 from app.outfits.application.exceptions import OutfitCloudNotConfiguredError, OutfitCloudResponseError
 from app.outfits.application.services import OutfitService, RegionOutfitService
@@ -16,11 +15,10 @@ from app.outfits.infrastructure.recommenders import (
     GeminiOutfitRecommender,
     LlmOutfitPersonalizer,
     PersonalizationChatClient,
-    PERSONALIZATION_VERSION,
     StructuredOutfitRecommender,
 )
 from app.outfits.infrastructure.weather_reader import WeatherServiceReader
-from app.outfits.infrastructure.prompts import PROMPT_VERSION
+from app.outfits.infrastructure.prompts import PERSONALIZATION_VERSION, PROMPT_VERSION
 from app.outfits.infrastructure.cache import CachedOutfitService, SQLitePersonalizedOutfitCache
 from app.outfits.infrastructure.jobs import WeeklyOutfitBatch
 from app.outfits.domain.models import OutfitPreferences
@@ -32,35 +30,61 @@ def _sampling_options(settings: Settings) -> dict:
     return {"temperature": settings.llm_temperature, "top_p": settings.llm_top_p, "min_p": settings.llm_min_p}
 
 
-def _local_recommender(settings: Settings, timeout_seconds: float) -> OutfitRecommender:
-    """로컬 추천 클라이언트 구성"""
+def _cache_scope(settings: Settings, version: str) -> str:
+    """기존 순서를 유지해 공통·개인 캐시가 같은 생성 설정을 구분한다."""
+    signature = json.dumps([
+        version, PROMPT_VERSION, settings.llm_base_url, settings.llm_model,
+        settings.llm_context_size, settings.cloud_fallback_enabled, settings.gemini_model,
+        settings.llm_today_context_size, settings.llm_thinking, settings.gemini_max_output_tokens,
+        _sampling_options(settings),
+    ])
+    return hashlib.sha256(signature.encode()).hexdigest()
+
+
+def _local_timeout(settings: Settings) -> float:
+    """공통·개인 추천에 같은 로컬 대기 제한을 적용한다."""
+    timeout = settings.llm_timeout_seconds
+    if settings.cloud_fallback_enabled and settings.fallback_local_timeout_seconds is not None:
+        timeout = min(timeout, settings.fallback_local_timeout_seconds)
+    return timeout
+
+
+def _local_recommender(
+    settings: Settings, timeout_seconds: float, preferences: OutfitPreferences | None = None,
+) -> OutfitRecommender:
+    """공통·개인 추천의 로컬 클라이언트를 같은 설정으로 구성한다."""
     client = OllamaClient(
         settings.llm_base_url, timeout_seconds, settings.llm_context_size,
         today_context_size=settings.llm_today_context_size,
         thinking=settings.llm_thinking,
         **_sampling_options(settings),
     )
-    return OllamaOutfitRecommender(client, settings.llm_model)
+    if preferences is None:
+        return OllamaOutfitRecommender(client, settings.llm_model)
+    return StructuredOutfitRecommender(PersonalizationChatClient(client, preferences), settings.llm_model, "ollama")
 
 
-def _cloud_recommender(settings: Settings) -> OutfitRecommender:
+def _cloud_recommender(settings: Settings, preferences: OutfitPreferences | None = None) -> OutfitRecommender:
     """클라우드 전환 시에만 Gemini 설정을 확인하고 추천 구현을 생성한다."""
     client = GeminiClient(settings.gemini_api_key, settings.gemini_timeout_seconds, settings.gemini_max_output_tokens)
-    return GeminiOutfitRecommender(client, settings.gemini_model)
+    if preferences is None:
+        return GeminiOutfitRecommender(client, settings.gemini_model)
+    return StructuredOutfitRecommender(
+        PersonalizationChatClient(client, preferences), settings.gemini_model, "gemini",
+        OutfitCloudResponseError, OutfitCloudNotConfiguredError,
+    )
 
 
 def get_outfit_service() -> OutfitService:
     """날씨 조회와 로컬 우선 추천 구현 연결"""
     settings = get_settings()
+    timeout = _local_timeout(settings)
     if settings.cloud_fallback_enabled:
-        timeout = settings.llm_timeout_seconds
-        if settings.fallback_local_timeout_seconds is not None:
-            timeout = min(timeout, settings.fallback_local_timeout_seconds)
         recommender: OutfitRecommender = FallbackOutfitRecommender(
             lambda: _local_recommender(settings, timeout), lambda: _cloud_recommender(settings),
         )
     else:
-        recommender = _local_recommender(settings, settings.llm_timeout_seconds)
+        recommender = _local_recommender(settings, timeout)
     return OutfitService(WeatherServiceReader(get_weather_service()), recommender)
 
 
@@ -68,17 +92,9 @@ def get_outfit_service() -> OutfitService:
 def get_cached_outfit_service() -> CachedOutfitService:
     """같은 모델·프롬프트 설정의 추천을 서버 재시작 후에도 공유"""
     settings = get_settings()
-    signature = json.dumps([
-        "outfit-cache-v2-sigungu", PROMPT_VERSION, settings.llm_base_url, settings.llm_model,
-        settings.llm_context_size, settings.cloud_fallback_enabled, settings.gemini_model,
-        settings.llm_today_context_size,
-        settings.llm_thinking,
-        settings.gemini_max_output_tokens,
-        _sampling_options(settings),
-    ])
-    scope = hashlib.sha256(signature.encode()).hexdigest()
     return CachedOutfitService(
-        settings.database_path, scope, get_outfit_service, settings.outfit_refresh_seconds,
+        settings.database_path, _cache_scope(settings, "outfit-cache-v2-sigungu"),
+        get_outfit_service, settings.outfit_refresh_seconds,
         reuse_unchanged_weather=True,
         max_entries=settings.outfit_cache_max_entries,
         weekly_batch_only=True, weekly_batch_hour=settings.outfit_weekly_batch_hour,
@@ -93,46 +109,26 @@ def get_region_outfit_service() -> RegionOutfitService:
     )
 
 
-def _personal_recommender(base: GeneratedOutfits, preferences: OutfitPreferences) -> OutfitRecommender:
+def _personal_recommender(preferences: OutfitPreferences) -> OutfitRecommender:
     """개인화에도 로컬 우선과 명시적 클라우드 전환 정책 적용"""
     settings = get_settings()
 
-    def local() -> OutfitRecommender:
-        timeout = settings.llm_timeout_seconds
-        if settings.cloud_fallback_enabled and settings.fallback_local_timeout_seconds is not None:
-            timeout = min(timeout, settings.fallback_local_timeout_seconds)
-        client = OllamaClient(
-            settings.llm_base_url, timeout, settings.llm_context_size,
-            today_context_size=settings.llm_today_context_size,
-            thinking=settings.llm_thinking,
-            **_sampling_options(settings),
+    timeout = _local_timeout(settings)
+    if settings.cloud_fallback_enabled:
+        return FallbackOutfitRecommender(
+            lambda: _local_recommender(settings, timeout, preferences),
+            lambda: _cloud_recommender(settings, preferences),
         )
-        return StructuredOutfitRecommender(PersonalizationChatClient(client, preferences), settings.llm_model, "ollama")
-
-    def cloud() -> OutfitRecommender:
-        client = GeminiClient(settings.gemini_api_key, settings.gemini_timeout_seconds, settings.gemini_max_output_tokens)
-        return StructuredOutfitRecommender(
-            PersonalizationChatClient(client, preferences), settings.gemini_model, "gemini",
-            OutfitCloudResponseError, OutfitCloudNotConfiguredError,
-        )
-
-    return FallbackOutfitRecommender(local, cloud) if settings.cloud_fallback_enabled else local()
+    return _local_recommender(settings, timeout, preferences)
 
 
 @lru_cache
 def get_personalized_outfit_cache() -> SQLitePersonalizedOutfitCache:
     """개인 조건의 동적 결과와 사전 생성 대상을 서버 수명 동안 공유"""
     settings = get_settings()
-    scope = hashlib.sha256(json.dumps([
-        PERSONALIZATION_VERSION, PROMPT_VERSION, settings.llm_base_url, settings.llm_model,
-        settings.llm_context_size, settings.cloud_fallback_enabled, settings.gemini_model,
-        settings.llm_today_context_size,
-        settings.llm_thinking,
-        settings.gemini_max_output_tokens,
-        _sampling_options(settings),
-    ]).encode()).hexdigest()
     return SQLitePersonalizedOutfitCache(
-        settings.database_path, scope, LlmOutfitPersonalizer(_personal_recommender),
+        settings.database_path, _cache_scope(settings, PERSONALIZATION_VERSION),
+        LlmOutfitPersonalizer(_personal_recommender),
         get_cached_outfit_service(), get_sigungu_resolver(), max_entries=settings.outfit_cache_max_entries,
         weekly_batch_only=True,
     )

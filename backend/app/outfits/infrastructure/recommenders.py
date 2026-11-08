@@ -139,12 +139,12 @@ class PersonalizationChatClient:
 
 
 class LlmOutfitPersonalizer:
-    def __init__(self, factory: Callable[[GeneratedOutfits, OutfitPreferences], OutfitRecommender]) -> None:
+    def __init__(self, factory: Callable[[OutfitPreferences], OutfitRecommender]) -> None:
         """지역 공통 추천과 동일한 통신·검증·전환 정책 사용"""
         self._factory = factory
 
     def personalize(self, base: GeneratedOutfits, preferences: OutfitPreferences) -> GeneratedOutfits:
         """동적 생성 결과에 개인화 프롬프트 버전과 실제 제공사 기록"""
         days = tuple(item.weather for item in base.recommendations)
-        generated = self._factory(base, preferences).recommend(days)
+        generated = self._factory(preferences).recommend(days)
         return replace(generated, engine=replace(generated.engine, prompt_version=PERSONALIZATION_VERSION))

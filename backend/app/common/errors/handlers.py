@@ -14,7 +14,8 @@ from starlette.exceptions import HTTPException
 # 프로젝트 모듈
 from app.common.errors.codes import ERROR_SPECS, ErrorCode
 from app.common.errors.exceptions import AppError
-from app.common.errors.schemas import ErrorDetail, ErrorResponse
+from app.common.errors.schemas import ErrorResponse
+from app.common.responses import ErrorDetail
 
 
 # 로그
