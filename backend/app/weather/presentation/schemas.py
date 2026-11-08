@@ -1,7 +1,10 @@
+# 표준 라이브러리
 from datetime import date as Date, datetime
 
+# 외부 라이브러리
 from pydantic import BaseModel, ConfigDict, Field
 
+# 프로젝트 모듈
 from app.weather.application.dto import TodayWeatherResult
 
 

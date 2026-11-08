@@ -1,8 +1,15 @@
+# 표준 라이브러리
 from typing import Protocol
 
-from app.outfits.application.dto import GeneratedOutfits, OutfitForecast, PersonalizedOutfits, TodayOutfitResult, WeeklyOutfitResult
-from app.outfits.domain.models import OutfitWeather
-from app.outfits.domain.models import OutfitPreferences
+# 프로젝트 모듈
+from app.outfits.application.dto import (
+    GeneratedOutfits,
+    OutfitForecast,
+    PersonalizedOutfits,
+    TodayOutfitResult,
+    WeeklyOutfitResult,
+)
+from app.outfits.domain.models import OutfitWeather, OutfitPreferences
 
 
 class OutfitWeatherReader(Protocol):

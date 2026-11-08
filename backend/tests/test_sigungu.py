@@ -1,5 +1,6 @@
 """공식 경계 판정의 코드 공유·실패 처리와 키 비노출을 검증한다."""
 
+# 표준 라이브러리
 import tempfile
 import unittest
 from contextlib import closing
@@ -8,9 +9,13 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock
 
+# 프로젝트 모듈
 from app.common.database import connect_database
 from app.weather.application.exceptions import (
-    InvalidWeatherQueryError, RegionNotConfiguredError, WeatherProviderDataError, WeatherProviderTimeoutError,
+    InvalidWeatherQueryError,
+    RegionNotConfiguredError,
+    WeatherProviderDataError,
+    WeatherProviderTimeoutError,
     WeatherProviderUnavailableError,
 )
 from app.weather.domain.models import Location

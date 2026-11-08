@@ -1,5 +1,7 @@
+# 표준 라이브러리
 from dataclasses import dataclass
 
+# 프로젝트 모듈
 from app.weather.domain.models import DailyForecast, HourlyForecast, Location, WeatherForecast
 
 

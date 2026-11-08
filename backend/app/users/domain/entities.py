@@ -1,9 +1,11 @@
 """FastAPI와 DB 라이브러리에 의존하지 않는 사용자 업무 객체."""
 
+# 표준 라이브러리
 import re
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
+# 프로젝트 모듈
 from app.users.domain.exceptions import InvalidUserError
 
 

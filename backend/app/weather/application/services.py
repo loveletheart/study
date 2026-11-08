@@ -1,3 +1,4 @@
+# 프로젝트 모듈
 from app.weather.application.dto import LocationSearchResult, TodayWeatherResult
 from app.weather.application.exceptions import InvalidWeatherQueryError, WeatherProviderDataError
 from app.weather.application.ports import LocationCatalog, WeatherProvider

@@ -1,20 +1,27 @@
 """공통·개인 갱신 실행기와 주간 배치를 함께 관리한다."""
 
+
+# 표준 라이브러리
 import logging
 from threading import Event, Thread
 from typing import Protocol
+
+# 프로젝트 모듈
 from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache, CachedOutfitService
 
 
+# 로그
 logger = logging.getLogger(__name__)
 
 
+# 갱신 작업 계약
 class RefreshTask(Protocol):
     def refresh_due(self, stopped: Event | None = None) -> object:
         """갱신 작업이 제공해야 하는 실행 계약."""
         ...
 
 
+# 백그라운드 갱신 작업
 class OutfitRefreshWorker:
     def __init__(self, service: RefreshTask) -> None:
         """서버 수명 동안 실행할 단일 갱신 작업 준비"""
@@ -41,6 +48,7 @@ class OutfitRefreshWorker:
             self._stopped.wait(60)
 
 
+# 주간 추천 배치
 class WeeklyOutfitBatch:
     def __init__(self, common: CachedOutfitService, personalized: SQLitePersonalizedOutfitCache) -> None:
         """주간 기본 결과를 준비한 뒤 해당 지역의 개인 결과도 준비"""

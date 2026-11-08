@@ -1,8 +1,7 @@
 """추천 온도 기준과 주간 의류 목록 구성."""
 
-from app.outfits.domain.models import (
-    OutfitRecommendation, OutfitWeather, TemperatureBasis, WeeklyWardrobe,
-)
+# 프로젝트 모듈
+from app.outfits.domain.models import OutfitRecommendation, OutfitWeather, TemperatureBasis, WeeklyWardrobe
 
 def temperature_reference(weather: OutfitWeather) -> tuple[TemperatureBasis, float]:
     """모델에 전달할 온도 기준을 원본 예보에서 선택"""

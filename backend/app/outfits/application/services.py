@@ -1,11 +1,25 @@
 """공통 추천 생성과 시군구·개인화 조합의 응용 서비스."""
 
+# 표준 라이브러리
 from datetime import datetime, timedelta
 from dataclasses import replace
 from uuid import uuid4
-from app.outfits.application.dto import GeneratedOutfits, OutfitForecast, TodayOutfitResult, WeeklyOutfitResult, RegionOutfitResult
+
+# 프로젝트 모듈
+from app.outfits.application.dto import (
+    GeneratedOutfits,
+    OutfitForecast,
+    TodayOutfitResult,
+    WeeklyOutfitResult,
+    RegionOutfitResult,
+)
 from app.outfits.application.exceptions import OutfitForecastError, OutfitLlmResponseError
-from app.outfits.application.ports import OutfitRecommender, OutfitWeatherReader, PersonalizedOutfitCache, RegionalOutfitCache
+from app.outfits.application.ports import (
+    OutfitRecommender,
+    OutfitWeatherReader,
+    PersonalizedOutfitCache,
+    RegionalOutfitCache,
+)
 from app.outfits.domain.models import OutfitWeather, OutfitPreferences
 from app.outfits.domain.rules import build_weekly_wardrobe, temperature_reference
 from app.weather.domain.models import KST
@@ -94,7 +108,7 @@ class RegionOutfitService:
         self._personalized = personalized
         self._regions = regions
 
-    def get_today(self, location_id: int, preferences: OutfitPreferences) -> RegionOutfitResult:
+    def get_today(self, location_id: int, preferences: OutfitPreferences) -> RegionOutfitResult[TodayOutfitResult]:
         """동네 기본 추천을 공유하고 개인화한 복사본만 반환"""
         location = self._locations.get(location_id)
         region = self._regions.resolve(location)
@@ -107,7 +121,7 @@ class RegionOutfitService:
             location, replace(base, recommendation=recommendation), preferences, recommendation.reasons, generated, cache_hit, region,
         )
 
-    def get_weekly(self, location_id: int, preferences: OutfitPreferences) -> RegionOutfitResult:
+    def get_weekly(self, location_id: int, preferences: OutfitPreferences) -> RegionOutfitResult[WeeklyOutfitResult]:
         """주간 추천에 개인 조건을 적용하고 준비 의류도 함께 다시 구성"""
         location = self._locations.get(location_id)
         region = self._regions.resolve(location)

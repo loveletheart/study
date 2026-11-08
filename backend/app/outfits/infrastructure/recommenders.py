@@ -1,18 +1,40 @@
 """공통 생성 검증·제공사별 생성기·개인화를 한곳에서 관리한다."""
 
+# 표준 라이브러리
 from typing import Protocol
-from pydantic import ValidationError
-from app.common.errors.exceptions import AppError
-from app.outfits.application.dto import GeneratedOutfits, RecommendationEngine
-from app.outfits.application.exceptions import OutfitLlmNotConfiguredError, OutfitLlmResponseError, OutfitCloudNotConfiguredError, OutfitCloudResponseError
-from app.outfits.domain.models import OutfitLook, OutfitRecommendation, OutfitWeather, TemperatureBasis, OutfitPreferences
-from app.outfits.domain.rules import temperature_reference
-from app.outfits.infrastructure.schemas import GeneratedLook, GeneratedResponse
-from app.outfits.infrastructure.prompts import PROMPT_VERSION, build_messages, PERSONALIZATION_VERSION, PERSONALIZATION_INSTRUCTION, _personal_requirements
-from app.outfits.infrastructure.clients import OllamaClient, GeminiClient
 import json
 from collections.abc import Callable
 from dataclasses import asdict, replace
+
+# 외부 라이브러리
+from pydantic import ValidationError
+
+# 프로젝트 모듈
+from app.common.errors.exceptions import AppError
+from app.outfits.application.dto import GeneratedOutfits, RecommendationEngine
+from app.outfits.application.exceptions import (
+    OutfitLlmNotConfiguredError,
+    OutfitLlmResponseError,
+    OutfitCloudNotConfiguredError,
+    OutfitCloudResponseError,
+)
+from app.outfits.domain.models import (
+    OutfitLook,
+    OutfitRecommendation,
+    OutfitWeather,
+    TemperatureBasis,
+    OutfitPreferences,
+)
+from app.outfits.domain.rules import temperature_reference
+from app.outfits.infrastructure.schemas import GeneratedLook, GeneratedResponse
+from app.outfits.infrastructure.prompts import (
+    PROMPT_VERSION,
+    build_messages,
+    PERSONALIZATION_VERSION,
+    PERSONALIZATION_INSTRUCTION,
+    _personal_requirements,
+)
+from app.outfits.infrastructure.clients import OllamaClient, GeminiClient
 from app.outfits.application.ports import OutfitRecommender
 
 

@@ -1,5 +1,6 @@
 """실제 외부 API 없이 영속 추천 캐시와 시간별 갱신을 검증한다."""
 
+# 표준 라이브러리
 import os
 import tempfile
 import unittest
@@ -11,8 +12,10 @@ from pathlib import Path
 from threading import Event
 from unittest.mock import Mock, patch
 
+# 외부 라이브러리
 from fastapi.testclient import TestClient
 
+# 프로젝트 모듈
 from app.common.config import get_settings
 from app.common.database import connect_database
 from app.outfits.application.exceptions import OutfitForecastError, OutfitLlmTimeoutError

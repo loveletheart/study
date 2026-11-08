@@ -1,5 +1,7 @@
 """외부 통신 없이 날씨 변환·캐시·오류 계약을 검증하는 합성 데이터 테스트."""
 
+
+# 표준 라이브러리
 import copy
 import io
 import json
@@ -10,25 +12,36 @@ from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
+# 외부 라이브러리
 from fastapi import Request
 
+# 프로젝트 모듈
 from app.common.errors.handlers import handle_app_error
 from app.weather.application.exceptions import (
-    InvalidWeatherQueryError, WeatherProviderDataError, WeatherProviderTimeoutError,
-    WeatherProviderUnavailableError, WeatherRateLimitError,
+    InvalidWeatherQueryError,
+    WeatherProviderDataError,
+    WeatherProviderTimeoutError,
+    WeatherProviderUnavailableError,
+    WeatherRateLimitError,
 )
 from app.weather.application.services import WeatherService
 from app.weather.domain.models import Coordinates, KST
 from app.weather.infrastructure.cache import TTLCache
 from app.weather.infrastructure.http_client import JsonHttpClient
 from app.weather.infrastructure.open_meteo import (
-    CURRENT_FIELDS, DAILY_FIELDS, HOURLY_FIELDS, OpenMeteoProvider,
+    CURRENT_FIELDS,
+    DAILY_FIELDS,
+    HOURLY_FIELDS,
+    OpenMeteoProvider,
 )
 from app.weather.presentation.router import get_today, get_weekly, search_locations
 
+
+# 테스트 기준 시각
 NOW = datetime(2026, 11, 4, 1, 10, tzinfo=timezone.utc)
 
 
+# 모의 예보 데이터 생성
 def forecast_payload(now: datetime = NOW) -> dict:
     """API 구조와 같은 합성 예보. 실제 날씨 데이터가 아니다."""
     first = now.astimezone(KST).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -62,6 +75,7 @@ def forecast_payload(now: datetime = NOW) -> dict:
     }
 
 
+# 검증 테스트
 class WeatherTests(unittest.TestCase):
     def setUp(self) -> None:
         """합성 날씨 데이터와 테스트용 제공사를 준비한다."""

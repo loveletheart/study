@@ -1,14 +1,19 @@
 """프로세스별 최대 개수가 제한된 TTL 캐시. 실패 응답은 저장하지 않는다."""
 
+
+# 표준 라이브러리
 from collections import OrderedDict
 from collections.abc import Callable
 from threading import RLock
 from time import monotonic
 from typing import TypeVar, cast
 
+
+# 캐시 결과 타입
 T = TypeVar("T")
 
 
+# 메모리 TTL 캐시
 class TTLCache:
     def __init__(self, ttl_seconds: float, max_entries: int = 128, timer: Callable[[], float] = monotonic):
         """캐시 유지 시간과 용량 설정"""

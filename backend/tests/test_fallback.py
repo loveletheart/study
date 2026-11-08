@@ -1,5 +1,6 @@
 """유료 호출 없이 로컬 우선 정책과 클라우드 자동 전환 확인."""
 
+# 표준 라이브러리
 import os
 import unittest
 from dataclasses import replace
@@ -7,10 +8,15 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.error import URLError
 
+# 프로젝트 모듈
 from app.common.config import Settings, get_settings
 from app.outfits.application.exceptions import (
-    OutfitCloudRateLimitError, OutfitLlmModelNotFoundError, OutfitLlmNotConfiguredError,
-    OutfitLlmResponseError, OutfitLlmTimeoutError, OutfitLlmUnavailableError,
+    OutfitCloudRateLimitError,
+    OutfitLlmModelNotFoundError,
+    OutfitLlmNotConfiguredError,
+    OutfitLlmResponseError,
+    OutfitLlmTimeoutError,
+    OutfitLlmUnavailableError,
 )
 from app.outfits.application.policies import FallbackOutfitRecommender
 from app.outfits.application.services import OutfitService

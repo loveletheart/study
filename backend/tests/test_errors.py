@@ -1,22 +1,33 @@
 """공통 오류 응답과 Swagger에 표시되는 공개 API 계약을 검증한다."""
 
+# 표준 라이브러리
 import json
 import unittest
 
+# 외부 라이브러리
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
 from starlette.exceptions import HTTPException
 
+# 프로젝트 모듈
 from app.common.errors.codes import ERROR_SPECS, ErrorCode
 from app.common.errors.exceptions import AppError
+from app.common.errors.schemas import ErrorResponse
 from app.common.errors.handlers import (
-    handle_app_error, handle_http_error, handle_unexpected_error, handle_validation_error,
+    handle_app_error,
+    handle_http_error,
+    handle_unexpected_error,
+    handle_validation_error,
 )
 from app.users.application.exceptions import UserNotFoundError
 from app.users.domain.exceptions import DuplicateEmailError, InvalidUserError
 from app.weather.application.exceptions import (
-    InvalidWeatherQueryError, WeatherProviderDataError, WeatherProviderTimeoutError,
-    WeatherProviderUnavailableError, WeatherRateLimitError,
+    InvalidWeatherQueryError,
+    WeatherProviderDataError,
+    WeatherProviderTimeoutError,
+    WeatherProviderUnavailableError,
+    WeatherRateLimitError,
 )
 from main import app
 
@@ -30,6 +41,26 @@ def request() -> Request:
 
 
 class ErrorContractTests(unittest.TestCase):
+    def test_error_response_preserves_code_validation_and_common_fields(self):
+        """공통 응답을 공유해도 오류 코드 열거형 검증과 JSON 형식을 유지한다."""
+        payload = ErrorResponse(code=ErrorCode.COMMON_NOT_FOUND, message="오류 응답 검증")
+        self.assertEqual(payload.model_dump(mode="json"), {
+            "code": "COMMON_NOT_FOUND", "message": "오류 응답 검증", "data": None, "details": [],
+        })
+        with self.assertRaises(ValidationError):
+            ErrorResponse.model_validate({"code": "UNREGISTERED_ERROR", "message": "오류 응답 검증"})
+        schema = ErrorResponse.model_json_schema()
+        self.assertEqual(set(schema["$defs"]["ErrorCode"]["enum"]), {code.value for code in ErrorCode})
+
+    def test_handlers_safely_accept_framework_exception_signature(self):
+        """프레임워크 규약의 일반 예외를 받아도 내부 정보 없이 500으로 처리한다."""
+        for handler in (handle_app_error, handle_validation_error, handle_http_error):
+            with self.subTest(handler=handler.__name__), self.assertLogs("app.common.errors.handlers", level="ERROR"):
+                response = handler(request(), RuntimeError("private-internal-detail"))
+            self.assertEqual(response.status_code, 500)
+            self.assertEqual(json.loads(response.body)["code"], "COMMON_INTERNAL_ERROR")
+            self.assertNotIn("private-internal-detail", response.body.decode())
+
     def test_every_code_has_a_definition(self):
         """모든 오류 코드의 정의와 고유성을 확인한다."""
         self.assertEqual(set(ErrorCode), set(ERROR_SPECS))

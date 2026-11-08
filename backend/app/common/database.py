@@ -1,8 +1,10 @@
 """SQLite 연결과 개발용 스키마 초기화. 요청마다 별도의 연결을 사용한다."""
 
+# 표준 라이브러리
 import sqlite3
 from pathlib import Path
 
+# 프로젝트 모듈
 from app.common.config import get_settings
 
 

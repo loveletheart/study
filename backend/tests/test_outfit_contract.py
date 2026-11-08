@@ -1,5 +1,6 @@
 """원피스·빈값 계약을 생성, 공개 응답, 주간 집계, 캐시 경계에서 확인한다."""
 
+# 표준 라이브러리
 import json
 import tempfile
 import unittest
@@ -7,16 +8,17 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+# 외부 라이브러리
 from pydantic import TypeAdapter
 
+# 프로젝트 모듈
 from app.common.config import Settings
 from app.outfits.application.exceptions import OutfitLlmResponseError
 from app.outfits.bootstrap import get_cached_outfit_service, get_personalized_outfit_cache
 from app.outfits.domain.models import OutfitLook, OutfitType
 from app.outfits.domain.rules import build_weekly_wardrobe
-from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender
+from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender, OllamaOutfitRecommender
 from app.outfits.infrastructure.schemas import GeneratedLook
-from app.outfits.infrastructure.recommenders import OllamaOutfitRecommender
 from app.outfits.infrastructure.prompts import LOOK_EXAMPLES, build_messages
 from app.outfits.presentation.schemas import TodayOutfitResponse
 from tests import test_outfits as fixtures

@@ -1,22 +1,34 @@
 """브이월드 시군구 경계의 점 포함 조회와 대표 위치 공유."""
 
+
+# 표준 라이브러리
 from contextlib import closing
 from datetime import datetime
 import logging
 from pathlib import Path
 
+# 프로젝트 모듈
 from app.common.database import connect_database
 from app.common.errors.exceptions import AppError
 from app.weather.application.exceptions import (
-    InvalidWeatherQueryError, RegionNotConfiguredError, WeatherProviderDataError, WeatherProviderUnavailableError,
+    InvalidWeatherQueryError,
+    RegionNotConfiguredError,
+    WeatherProviderDataError,
+    WeatherProviderUnavailableError,
 )
 from app.weather.domain.models import Coordinates, KST, Location, SigunguRegion
 from app.weather.infrastructure.http_client import JsonHttpClient
 
-VWORLD_DATA_URL = "https://api.vworld.kr/req/data"
+
+# 로그
 logger = logging.getLogger(__name__)
 
 
+# 외부 API 주소
+VWORLD_DATA_URL = "https://api.vworld.kr/req/data"
+
+
+# 시군구 경계 조회와 저장
 class VWorldSigunguResolver:
     def __init__(self, database_path: Path, api_key: str, domain: str = "", http=None, clock=None) -> None:
         """키는 저장·응답하지 않고 공식 코드와 검증한 대표 위치만 저장"""

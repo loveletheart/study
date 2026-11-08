@@ -1,7 +1,9 @@
 """사용자 기능의 처리 순서와 트랜잭션 범위를 관리한다."""
 
+# 표준 라이브러리
 from uuid import UUID
 
+# 프로젝트 모듈
 from app.users.application.dto import CreateUserCommand, UserDTO
 from app.users.application.exceptions import UserNotFoundError
 from app.users.application.unit_of_work import UserUnitOfWork

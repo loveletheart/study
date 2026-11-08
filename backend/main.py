@@ -1,3 +1,4 @@
+# 표준 라이브러리
 from contextlib import asynccontextmanager
 
 # 편집기의 "Run Python File" 버튼으로 실행할 때도 동일한 환경 준비 과정을 거칩니다.
@@ -19,20 +20,27 @@ if __name__ == "__main__":
         )
     )
 
+# 외부 라이브러리
 from fastapi import FastAPI
 
+# 프로젝트 모듈
 from app.common.config import get_settings
 from app.common.database import initialize_database
 from app.common.errors.handlers import register_exception_handlers
 from app.common.errors.openapi import error_code_table, error_responses
 from app.common.responses import ApiResponse
 from app.outfits.presentation.router import router as outfits_router
-from app.outfits.bootstrap import get_cached_outfit_service, get_personalized_outfit_cache, get_weekly_outfit_batch
+from app.outfits.bootstrap import (
+    get_cached_outfit_service,
+    get_personalized_outfit_cache,
+    get_weekly_outfit_batch,
+)
 from app.outfits.infrastructure.jobs import OutfitRefreshWorker
 from app.users.presentation.router import router as users_router
 from app.weather.presentation.router import router as weather_router
 
 
+# 서버 시작·종료 처리
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """DB 준비와 저장된 지역의 추천 주기 갱신 시작·종료"""
@@ -51,6 +59,7 @@ async def lifespan(app: FastAPI):
         worker.stop()
 
 
+# 애플리케이션 생성: 시작·종료 함수 정의 후 연결
 app = FastAPI(
     title=get_settings().app_name,
     lifespan=lifespan,
@@ -68,6 +77,7 @@ app = FastAPI(
         {"name": "system", "description": "서비스 안내와 서버 응답 상태 확인"},
     ],
 )
+# 예외 처리기와 업무별 라우터 등록
 register_exception_handlers(app)
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")

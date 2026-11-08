@@ -1,12 +1,14 @@
 """모든 API가 공유하는 오류 응답 계약."""
 
+# 외부 라이브러리
 from pydantic import Field
 
+# 프로젝트 모듈
 from app.common.errors.codes import ErrorCode
-from app.common.responses import ApiResponse, ErrorDetail
+from app.common.responses import ErrorDetail as ErrorDetail, ResponseEnvelope
 
 
-class ErrorResponse(ApiResponse[None]):
+class ErrorResponse(ResponseEnvelope[None, ErrorCode]):
     """HTTP 상태와 별개로 code를 통해 업무 오류 종류를 구분한다."""
 
     code: ErrorCode = Field(description="common/errors/codes.py에서 관리하는 오류 식별자")

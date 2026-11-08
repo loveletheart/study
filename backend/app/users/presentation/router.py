@@ -1,8 +1,11 @@
+# 표준 라이브러리
 from typing import Annotated
 from uuid import UUID
 
+# 외부 라이브러리
 from fastapi import APIRouter, Depends, Path, Response, status
 
+# 프로젝트 모듈
 from app.common.errors.codes import ErrorCode
 from app.common.errors.openapi import error_responses
 from app.common.responses import ApiResponse
@@ -11,10 +14,16 @@ from app.users.application.services import UserService
 from app.users.bootstrap import get_user_service
 from app.users.presentation.schemas import CreateUserRequest, UserResponse
 
+
+# 라우터 설정
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+# 서비스 의존성
 UserServiceDependency = Annotated[UserService, Depends(get_user_service)]
 
 
+# 사용자 API
 @router.post(
     "",
     response_model=ApiResponse[UserResponse],

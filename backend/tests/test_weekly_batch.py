@@ -1,5 +1,6 @@
 """오늘 문맥 분리와 야간 전용 주간 배치 정책의 회귀 검증."""
 
+# 표준 라이브러리
 import os
 import tempfile
 import unittest
@@ -8,13 +9,13 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+# 프로젝트 모듈
 from app.common.config import get_settings
 from app.outfits.application.exceptions import OutfitLlmTimeoutError, WeeklyOutfitNotReadyError
 from app.outfits.application.services import RegionOutfitService
 from app.outfits.domain.models import OutfitPreferences, OutfitStyle
 from app.outfits.infrastructure.clients import OllamaClient
-from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache
-from app.outfits.infrastructure.cache import CachedOutfitService
+from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache, CachedOutfitService
 from app.outfits.presentation.schemas import WeeklyOutfitResponse
 from app.weather.domain.models import KST, Location, SigunguRegion
 from app.weather.infrastructure.cache import TTLCache

@@ -1,17 +1,27 @@
 """좌표·시군구 오늘/주간 옷차림 API를 한 라우터에서 관리한다."""
+# 표준 라이브러리
+from typing import Annotated
 
+# 외부 라이브러리
 from fastapi import APIRouter, Depends, Query, Path
+
+# 프로젝트 모듈
 from app.common.errors.codes import ErrorCode
 from app.common.errors.openapi import error_responses
-from typing import Annotated
 from app.common.responses import ApiResponse
 from app.outfits.bootstrap import get_cached_outfit_service, get_region_outfit_service
 from app.outfits.infrastructure.cache import CachedOutfitService
-from app.outfits.presentation.schemas import TodayOutfitResponse, WeeklyOutfitResponse, NeighborhoodTodayResponse, NeighborhoodWeeklyResponse
+from app.outfits.presentation.schemas import (
+    TodayOutfitResponse,
+    WeeklyOutfitResponse,
+    NeighborhoodTodayResponse,
+    NeighborhoodWeeklyResponse,
+)
 from app.outfits.application.services import RegionOutfitService
 from app.outfits.domain.models import Activity, ColdSensitivity, OutfitPreferences, OutfitStyle
 
 
+# 라우터 설정
 router = APIRouter(prefix="/outfits", tags=["outfits"], responses=error_responses(
     ErrorCode.OUTFIT_INVALID_FORECAST,
     ErrorCode.OUTFIT_WEEKLY_NOT_READY,
@@ -35,15 +45,32 @@ router = APIRouter(prefix="/outfits", tags=["outfits"], responses=error_response
 ))
 
 
+# 서비스 의존성
 OutfitServiceDependency = Annotated[CachedOutfitService, Depends(get_cached_outfit_service)]
+RegionDependency = Annotated[RegionOutfitService, Depends(get_region_outfit_service)]
 
 
+# 요청 매개변수 타입
 Latitude = Annotated[float, Query(ge=-90, le=90, allow_inf_nan=False, description="지역 검색 결과의 위도", examples=[37.5665])]
-
-
 Longitude = Annotated[float, Query(ge=-180, le=180, allow_inf_nan=False, description="지역 검색 결과의 경도", examples=[126.978])]
+LocationId = Annotated[int, Path(gt=0, description="국내 지역 검색 API에서 받은 GeoNames 식별자. 공식 행정동 코드가 아님")]
 
 
+# 개인화 조건 변환
+def get_preferences(
+    cold_sensitivity: Annotated[ColdSensitivity, Query(description="normal: 보통, cold: 추위를 많이 탐, warm: 더위를 많이 탐")] = ColdSensitivity.NORMAL,
+    style: Annotated[OutfitStyle, Query(description="default: 기본, casual: 편안함, formal: 단정함")] = OutfitStyle.DEFAULT,
+    activity: Annotated[Activity, Query(description="daily: 일상, outdoor: 야외, active: 활동량 많음")] = Activity.DAILY,
+) -> OutfitPreferences:
+    """개인 조건은 요청으로 받고 공통 추천 캐시 키에는 포함하지 않는다."""
+    return OutfitPreferences(cold_sensitivity, style, activity)
+
+
+# 개인화 의존성: 조건 변환 함수 정의 후 생성
+PreferencesDependency = Annotated[OutfitPreferences, Depends(get_preferences)]
+
+
+# 옷차림 조회 API
 @router.get(
     "/today", response_model=ApiResponse[TodayOutfitResponse],
     summary="오늘 옷차림 추천", operation_id="get_today_outfit",
@@ -66,24 +93,6 @@ def get_weekly(latitude: Latitude, longitude: Longitude, service: OutfitServiceD
     """7일 옷차림과 공통 준비 의류 조회"""
     result = service.get_weekly(latitude, longitude)
     return ApiResponse(data=WeeklyOutfitResponse.from_result(result))
-
-
-RegionDependency = Annotated[RegionOutfitService, Depends(get_region_outfit_service)]
-
-
-LocationId = Annotated[int, Path(gt=0, description="국내 지역 검색 API에서 받은 GeoNames 식별자. 공식 행정동 코드가 아님")]
-
-
-def get_preferences(
-    cold_sensitivity: Annotated[ColdSensitivity, Query(description="normal: 보통, cold: 추위를 많이 탐, warm: 더위를 많이 탐")] = ColdSensitivity.NORMAL,
-    style: Annotated[OutfitStyle, Query(description="default: 기본, casual: 편안함, formal: 단정함")] = OutfitStyle.DEFAULT,
-    activity: Annotated[Activity, Query(description="daily: 일상, outdoor: 야외, active: 활동량 많음")] = Activity.DAILY,
-) -> OutfitPreferences:
-    """개인 조건은 요청으로 받고 공통 추천 캐시 키에는 포함하지 않는다."""
-    return OutfitPreferences(cold_sensitivity, style, activity)
-
-
-PreferencesDependency = Annotated[OutfitPreferences, Depends(get_preferences)]
 
 
 @router.get(
