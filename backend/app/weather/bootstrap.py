@@ -1,5 +1,7 @@
+# 표준 라이브러리
 from functools import lru_cache
 
+# 프로젝트 모듈
 from app.common.config import get_settings
 from app.weather.application.services import WeatherService
 from app.weather.infrastructure.cache import TTLCache

@@ -1,18 +1,25 @@
 """공식 SDK 경계에서 Gemini 요청, 응답 검증과 자동 전환 오류를 확인한다."""
 
+# 표준 라이브러리
 import json
 import unittest
 from datetime import timedelta
 from unittest.mock import Mock, patch
 
+# 외부 라이브러리
 import httpx
 from fastapi import Request
 from google.genai import Client as SDKClient, errors, types
 
+# 프로젝트 모듈
 from app.common.errors.handlers import handle_app_error
 from app.outfits.application.exceptions import (
-    OutfitCloudAuthError, OutfitCloudNotConfiguredError, OutfitCloudRateLimitError,
-    OutfitCloudResponseError, OutfitCloudTimeoutError, OutfitCloudUnavailableError,
+    OutfitCloudAuthError,
+    OutfitCloudNotConfiguredError,
+    OutfitCloudRateLimitError,
+    OutfitCloudResponseError,
+    OutfitCloudTimeoutError,
+    OutfitCloudUnavailableError,
 )
 from app.outfits.infrastructure.clients import MAX_RESPONSE_BYTES, GeminiClient
 from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender

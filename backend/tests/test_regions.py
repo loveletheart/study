@@ -1,5 +1,6 @@
 """동네 공통 추천 재사용과 개인화·날씨 변경을 외부 호출 없이 검증한다."""
 
+# 표준 라이브러리
 import tempfile
 import os
 import json
@@ -11,18 +12,22 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+# 외부 라이브러리
 from fastapi.testclient import TestClient
 
+# 프로젝트 모듈
 from app.common.database import connect_database
 from app.common.config import get_settings
-from app.outfits.application.exceptions import OutfitLlmTimeoutError
+from app.outfits.application.exceptions import OutfitForecastError, OutfitLlmTimeoutError
 from app.outfits.application.services import RegionOutfitService
 from app.outfits.bootstrap import get_region_outfit_service
 from app.outfits.domain.models import Activity, ColdSensitivity, OutfitPreferences, OutfitStyle
-from app.outfits.infrastructure.recommenders import LlmOutfitPersonalizer, PersonalizationChatClient
-from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache
-from app.outfits.infrastructure.recommenders import StructuredOutfitRecommender
-from app.outfits.infrastructure.cache import CachedOutfitService
+from app.outfits.infrastructure.recommenders import (
+    LlmOutfitPersonalizer,
+    PersonalizationChatClient,
+    StructuredOutfitRecommender,
+)
+from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache, CachedOutfitService
 from app.weather.application.exceptions import InvalidWeatherQueryError
 from app.weather.application.services import WeatherService
 from app.weather.bootstrap import get_weather_service
@@ -95,6 +100,35 @@ class RegionTests(unittest.TestCase):
             rows = connection.execute("SELECT kind, latitude, longitude FROM outfit_result_cache").fetchall()
         self.assertEqual([tuple(row) for row in rows], [("region:99001:today", 37, 127)])
         self.personal_llm.chat.assert_called_once()
+
+    def test_personal_cache_rejects_mismatched_result_kind_before_registration_or_inference(self):
+        """오늘·주간 기본 결과를 잘못 전달하면 저장이나 모델 호출 전에 거부한다."""
+        today = self.service.get_today(1001, OutfitPreferences()).result
+        weekly = self.service.get_weekly(1001, OutfitPreferences()).result
+        for kind, base in [("today", weekly), ("weekly", today), ("unknown", today)]:
+            with self.subTest(kind=kind), self.assertRaises(OutfitForecastError):
+                self.personal_cache.get(99001, kind, base, OutfitPreferences(style=OutfitStyle.FORMAL))
+        self.personal_llm.chat.assert_not_called()
+        with closing(connect_database(self.database_path)) as connection:
+            count = connection.execute("SELECT COUNT(*) FROM outfit_personal_targets").fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_personal_cache_hashes_legacy_results_without_versions_for_both_kinds(self):
+        """버전이 없는 기존 결과도 오늘·주간 타입별로 직렬화하고 캐시를 재사용한다."""
+        for kind, base in [
+            ("today", self.service.get_today(1001, OutfitPreferences()).result),
+            ("weekly", self.service.get_weekly(1001, OutfitPreferences()).result),
+        ]:
+            with self.subTest(kind=kind):
+                legacy = replace(base, base_version=None)
+                preferences = OutfitPreferences(style=OutfitStyle.FORMAL)
+                first, first_hit = self.personal_cache.get(99001, kind, legacy, preferences)
+                second, second_hit = self.personal_cache.get(99001, kind, legacy, preferences)
+                self.assertFalse(first_hit)
+                self.assertTrue(second_hit)
+                self.assertEqual(first, second)
+                self.assertEqual(len(first.base_version), 64)
+        self.assertEqual(self.personal_llm.chat.call_count, 2)
 
     def test_weekly_personalization_rebuilds_wardrobe_without_an_extra_model_call(self):
         """개인화한 주간 의류 목록은 기본 준비물과 분리하고 추가 추론하지 않는다."""

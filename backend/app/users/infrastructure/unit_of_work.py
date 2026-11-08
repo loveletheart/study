@@ -1,8 +1,10 @@
 """트랜잭션을 커밋하고, 커밋되지 않은 작업은 롤백한 뒤 연결을 닫는다."""
 
+# 표준 라이브러리
 from pathlib import Path
 from types import TracebackType
 
+# 프로젝트 모듈
 from app.common.database import connect_database
 from app.users.application.unit_of_work import UserUnitOfWork
 from app.users.infrastructure.repositories import SQLiteUserRepository

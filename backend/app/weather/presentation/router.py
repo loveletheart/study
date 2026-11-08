@@ -1,16 +1,19 @@
+# 표준 라이브러리
 from typing import Annotated
 
+# 외부 라이브러리
 from fastapi import APIRouter, Depends, Query
 
+# 프로젝트 모듈
 from app.common.errors.codes import ErrorCode
 from app.common.errors.openapi import error_responses
 from app.common.responses import ApiResponse
 from app.weather.application.services import WeatherService
 from app.weather.bootstrap import get_weather_service
-from app.weather.presentation.schemas import (
-    LocationsResponse, TodayWeatherResponse, WeeklyWeatherResponse,
-)
+from app.weather.presentation.schemas import LocationsResponse, TodayWeatherResponse, WeeklyWeatherResponse
 
+
+# 라우터 설정
 router = APIRouter(prefix="/weather", tags=["weather"], responses=error_responses(
     ErrorCode.WEATHER_INVALID_QUERY,
     ErrorCode.WEATHER_INVALID_RESPONSE,
@@ -18,11 +21,18 @@ router = APIRouter(prefix="/weather", tags=["weather"], responses=error_response
     ErrorCode.WEATHER_RATE_LIMITED,
     ErrorCode.WEATHER_TIMEOUT,
 ))
+
+
+# 서비스 의존성
 WeatherServiceDependency = Annotated[WeatherService, Depends(get_weather_service)]
+
+
+# 요청 매개변수 타입
 Latitude = Annotated[float, Query(ge=-90, le=90, allow_inf_nan=False, description="지역 검색 결과의 위도. 서울 예시: 37.5665", examples=[37.5665])]
 Longitude = Annotated[float, Query(ge=-180, le=180, allow_inf_nan=False, description="지역 검색 결과의 경도. 서울 예시: 126.978", examples=[126.978])]
 
 
+# 날씨 조회 API
 @router.get(
     "/locations", response_model=ApiResponse[LocationsResponse],
     summary="국내 지역 검색", operation_id="search_weather_locations",

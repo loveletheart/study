@@ -1,24 +1,28 @@
+# 표준 라이브러리
 import hashlib
 import json
 from functools import lru_cache
 
+# 프로젝트 모듈
 from app.common.config import Settings, get_settings
 from app.outfits.application.policies import FallbackOutfitRecommender
 from app.outfits.application.dto import GeneratedOutfits
 from app.outfits.application.ports import OutfitRecommender
 from app.outfits.application.exceptions import OutfitCloudNotConfiguredError, OutfitCloudResponseError
 from app.outfits.application.services import OutfitService, RegionOutfitService
-from app.outfits.infrastructure.clients import OllamaClient
-from app.outfits.infrastructure.recommenders import OllamaOutfitRecommender
-from app.outfits.infrastructure.clients import GeminiClient
-from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender
+from app.outfits.infrastructure.clients import OllamaClient, GeminiClient
+from app.outfits.infrastructure.recommenders import (
+    OllamaOutfitRecommender,
+    GeminiOutfitRecommender,
+    LlmOutfitPersonalizer,
+    PersonalizationChatClient,
+    PERSONALIZATION_VERSION,
+    StructuredOutfitRecommender,
+)
 from app.outfits.infrastructure.weather_reader import WeatherServiceReader
 from app.outfits.infrastructure.prompts import PROMPT_VERSION
-from app.outfits.infrastructure.cache import CachedOutfitService
-from app.outfits.infrastructure.recommenders import LlmOutfitPersonalizer, PersonalizationChatClient, PERSONALIZATION_VERSION
-from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache
+from app.outfits.infrastructure.cache import CachedOutfitService, SQLitePersonalizedOutfitCache
 from app.outfits.infrastructure.jobs import WeeklyOutfitBatch
-from app.outfits.infrastructure.recommenders import StructuredOutfitRecommender
 from app.outfits.domain.models import OutfitPreferences
 from app.weather.bootstrap import get_location_catalog, get_sigungu_resolver, get_weather_service
 

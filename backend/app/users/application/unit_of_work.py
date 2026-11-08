@@ -1,8 +1,10 @@
 """애플리케이션이 필요한 트랜잭션 기능. DB 구현은 알지 못한다."""
 
+# 표준 라이브러리
 from abc import ABC, abstractmethod
 from types import TracebackType
 
+# 프로젝트 모듈
 from app.users.domain.repositories import UserRepository
 
 

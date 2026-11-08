@@ -1,14 +1,21 @@
 """공통·개인화 프롬프트와 날씨·개인 조건 입력 구성."""
 
+
+# 표준 라이브러리
 import json
 from dataclasses import asdict
+
+# 프로젝트 모듈
 from app.outfits.domain.models import OutfitWeather, Activity, ColdSensitivity, OutfitPreferences, OutfitStyle
 from app.outfits.domain.rules import temperature_reference
 
 
+# 프롬프트 버전
 PROMPT_VERSION = "2.2"
+PERSONALIZATION_VERSION = "2.4"
 
 
+# 기본 추천 프롬프트
 SYSTEM_PROMPT = """제공된 날씨와 명시한 사용자 요구만 사용해 실용적인 옷차림을 추천하세요. 자연스러운 한국어로 작성하세요.
 입력 날짜·개수·순서를 유지하고 output_schema에 맞는 JSON 객체만 반환하세요. Markdown, 추가 필드, 날씨 데이터는 반환하지 마세요.
 실제로 흔히 쓰는 의류명을 사용하고 필드마다 한 가지를 선택하세요. 이유는 의류명 안이 아니라 reasons/avoid_reasons에 작성하세요.
@@ -24,6 +31,7 @@ reference_temperature_c는 temperature_basis에 따른 최고값이며 최저값
 look_examples는 필드 구성만 보여줍니다. 현재 날씨와 요청에 맞게 의류를 선택하고 조합과 설명을 자연스럽게 다양하게 작성하세요."""
 
 
+# 출력 형식 예시
 LOOK_EXAMPLES = (
     {"outfit_type": "separates", "top": "셔츠", "bottom": "면바지", "one_piece": None,
      "outerwear": "재킷", "shoes": "운동화", "accessories": ["우산"]},
@@ -32,6 +40,15 @@ LOOK_EXAMPLES = (
 )
 
 
+# 개인화 프롬프트
+PERSONALIZATION_INSTRUCTION = """명시된 preferences와 personal_requirements를 모두 함께 반영하세요.
+cold_sensitivity='cold'는 추위를 많이 타는 것, 'warm'은 더위를 많이 타는 것, normal은 어느 쪽도 아닌 것을 뜻합니다. 반대로 해석하지 마세요.
+formal은 격식 있고 단정한 옷차림, casual은 일상의 편안함, active는 움직임과 땀 관리, outdoor는 야외 노출에 대한 보호가 필요합니다.
+실제로 선택한 옷이 이 사람의 요구와 날씨에 어떻게 맞는지 설명하세요. 상투적인 문구를 피하세요.
+더위를 탄다고 추운 날 필요한 방한을 생략하지 말고, 추위를 탄다고 더운 날 겨울옷을 정당화하지 마세요."""
+
+
+# 프롬프트 입력 생성
 def build_messages(days: tuple[OutfitWeather, ...], schema: dict) -> list[dict[str, str]]:
     """날씨 원본과 출력 스키마로 채팅 메시지 구성"""
     weather = []
@@ -52,16 +69,6 @@ def build_messages(days: tuple[OutfitWeather, ...], schema: dict) -> list[dict[s
         "look_examples": LOOK_EXAMPLES, "output_schema": schema,
     }, ensure_ascii=False, allow_nan=False)
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": content}]
-
-
-PERSONALIZATION_VERSION = "2.4"
-
-
-PERSONALIZATION_INSTRUCTION = """명시된 preferences와 personal_requirements를 모두 함께 반영하세요.
-cold_sensitivity='cold'는 추위를 많이 타는 것, 'warm'은 더위를 많이 타는 것, normal은 어느 쪽도 아닌 것을 뜻합니다. 반대로 해석하지 마세요.
-formal은 격식 있고 단정한 옷차림, casual은 일상의 편안함, active는 움직임과 땀 관리, outdoor는 야외 노출에 대한 보호가 필요합니다.
-실제로 선택한 옷이 이 사람의 요구와 날씨에 어떻게 맞는지 설명하세요. 상투적인 문구를 피하세요.
-더위를 탄다고 추운 날 필요한 방한을 생략하지 말고, 추위를 탄다고 더운 날 겨울옷을 정당화하지 마세요."""
 
 
 def _personal_requirements(preferences: OutfitPreferences) -> dict[str, str]:

@@ -1,5 +1,6 @@
 """새 체크아웃과 누락된 활성화 스크립트의 실행 준비를 검증한다."""
 
+# 표준 라이브러리
 import json
 import os
 import runpy

@@ -1,8 +1,18 @@
 """기본·지역·개인화 옷차림 API의 응답 모델."""
 
+# 표준 라이브러리
 from datetime import date as Date, datetime
+
+# 외부 라이브러리
 from pydantic import BaseModel, ConfigDict, Field
-from app.outfits.application.dto import OutfitForecast, TodayOutfitResult, WeeklyOutfitResult, RegionOutfitResult
+
+# 프로젝트 모듈
+from app.outfits.application.dto import (
+    OutfitForecast,
+    TodayOutfitResult,
+    WeeklyOutfitResult,
+    RegionOutfitResult,
+)
 from app.outfits.domain.models import OutfitType, TemperatureBasis, Activity, ColdSensitivity, OutfitStyle
 from app.weather.presentation.schemas import LocationResponse
 
@@ -145,7 +155,7 @@ class SigunguResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-def _personal_metadata(result: RegionOutfitResult) -> dict:
+def _personal_metadata(result: RegionOutfitResult[TodayOutfitResult] | RegionOutfitResult[WeeklyOutfitResult]) -> dict:
     """공통 생성 정보와 별개로 요청별 적용 조건 표시"""
     return {
         "location": LocationResponse.model_validate(result.location),
@@ -168,7 +178,7 @@ class NeighborhoodTodayResponse(TodayOutfitResponse):
     personalization: PersonalizationResponse = Field(description="공통 저장값과 분리해 적용한 개인 조건")
 
     @classmethod
-    def from_region(cls, result: RegionOutfitResult) -> "NeighborhoodTodayResponse":
+    def from_region(cls, result: RegionOutfitResult[TodayOutfitResult]) -> "NeighborhoodTodayResponse":
         """개인화된 오늘 결과와 공유 지역 정보 직렬화"""
         return cls.model_validate({**TodayOutfitResponse.from_result(result.result).model_dump(), **_personal_metadata(result)})
 
@@ -179,6 +189,6 @@ class NeighborhoodWeeklyResponse(WeeklyOutfitResponse):
     personalization: PersonalizationResponse = Field(description="주간 추천에 적용한 개인 조건")
 
     @classmethod
-    def from_region(cls, result: RegionOutfitResult) -> "NeighborhoodWeeklyResponse":
+    def from_region(cls, result: RegionOutfitResult[WeeklyOutfitResult]) -> "NeighborhoodWeeklyResponse":
         """개인화된 주간 결과와 공유 지역 정보 직렬화"""
         return cls.model_validate({**WeeklyOutfitResponse.from_result(result.result).model_dump(), **_personal_metadata(result)})

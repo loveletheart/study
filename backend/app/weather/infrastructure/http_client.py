@@ -1,5 +1,6 @@
 """타임아웃·응답 크기 제한이 있는 동기 JSON 클라이언트."""
 
+# 표준 라이브러리
 import json
 import socket
 from http.client import HTTPException
@@ -7,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+# 프로젝트 모듈
 from app.weather.application.exceptions import (
     WeatherProviderDataError,
     WeatherProviderTimeoutError,

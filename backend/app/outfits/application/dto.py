@@ -1,11 +1,14 @@
+# 표준 라이브러리
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Generic, TypeVar
 
-from app.outfits.domain.models import OutfitRecommendation, OutfitWeather, WeeklyWardrobe
-from app.outfits.domain.models import OutfitPreferences
+# 프로젝트 모듈
+from app.outfits.domain.models import OutfitRecommendation, OutfitWeather, WeeklyWardrobe, OutfitPreferences
 from app.weather.domain.models import Location, SigunguRegion
 
 
+# 날씨와 추천 엔진 전달 객체
 @dataclass(frozen=True)
 class OutfitCoordinates:
     latitude: float
@@ -38,6 +41,7 @@ class GeneratedOutfits:
     engine: RecommendationEngine
 
 
+# 오늘·주간 추천 결과
 @dataclass(frozen=True)
 class TodayOutfitResult:
     forecast: OutfitForecast
@@ -58,10 +62,15 @@ class WeeklyOutfitResult:
     base_version: str | None = None
 
 
+# 지역별 결과 타입: 오늘·주간 결과 클래스 정의 후 선언
+RegionResultT = TypeVar("RegionResultT", TodayOutfitResult, WeeklyOutfitResult)
+
+
+# 지역별 추천과 개인화 결과
 @dataclass(frozen=True)
-class RegionOutfitResult:
+class RegionOutfitResult(Generic[RegionResultT]):
     location: Location
-    result: TodayOutfitResult | WeeklyOutfitResult
+    result: RegionResultT
     preferences: OutfitPreferences
     adjustments: tuple[str, ...]
     personalization: "PersonalizedOutfits | None" = None

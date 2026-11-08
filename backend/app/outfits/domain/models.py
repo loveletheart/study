@@ -1,5 +1,6 @@
 """옷차림 날씨·의류 구성·개인 선택 조건의 도메인 모델."""
 
+# 표준 라이브러리
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum

@@ -1,11 +1,17 @@
 """오류 코드·기본 메시지·HTTP 상태의 단일 관리 지점. 웹 라이브러리에 의존하지 않는다."""
 
+
+# 표준 라이브러리
+
+# 표준 라이브러리
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 from typing import Mapping
 
 
+# 오류 코드
+# 오류 코드
 class ErrorCode(str, Enum):
     """클라이언트가 오류 종류를 구분하는 안정적인 식별자."""
 
@@ -38,6 +44,8 @@ class ErrorCode(str, Enum):
     OUTFIT_CLOUD_INVALID_RESPONSE = "OUTFIT_CLOUD_INVALID_RESPONSE"
 
 
+# 오류 명세 모델
+# 오류 명세 모델
 @dataclass(frozen=True)
 class ErrorSpec:
     """오류 코드에 대응하는 기본 HTTP 상태와 사용자 안내 메시지."""
@@ -46,6 +54,8 @@ class ErrorSpec:
     message: str
 
 
+# 오류별 HTTP 상태와 기본 메시지: 위의 코드·명세 타입 정의 후 생성
+# 오류별 HTTP 상태와 기본 메시지: 위의 코드·명세 타입 정의 후 생성
 ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
     # 400번대 오류는 클라이언트 문제이므로, 클라이언트에게 안내 메시지를 전달합니다.
     ErrorCode.COMMON_INVALID_REQUEST: ErrorSpec(422, "요청 입력값을 확인해 주세요."),

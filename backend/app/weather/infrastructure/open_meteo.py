@@ -1,24 +1,38 @@
 """Open-Meteo의 응답 형식을 도메인 모델로 변환하는 어댑터."""
 
+
+# 표준 라이브러리
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from math import isfinite
 
+# 프로젝트 모듈
 from app.weather.application.exceptions import WeatherProviderDataError
 from app.weather.domain.models import (
-    KST, Coordinates, CurrentWeather, DailyForecast, HourlyForecast, Location, WeatherForecast,
+    KST,
+    Coordinates,
+    CurrentWeather,
+    DailyForecast,
+    HourlyForecast,
+    Location,
+    WeatherForecast,
 )
 from app.weather.infrastructure.cache import TTLCache
 from app.weather.infrastructure.http_client import JsonHttpClient
 
+
+# 외부 API 주소
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 
+
+# API 요청 항목과 단위
 CURRENT_FIELDS = {
     "temperature_2m": "°C", "apparent_temperature": "°C",
     "relative_humidity_2m": "%", "precipitation": "mm",
     "wind_speed_10m": "m/s", "weather_code": "wmo code", "is_day": "",
 }
+
 DAILY_FIELDS = {
     "temperature_2m_min": "°C", "temperature_2m_max": "°C",
     "apparent_temperature_min": "°C", "apparent_temperature_max": "°C",
@@ -26,12 +40,14 @@ DAILY_FIELDS = {
     "snowfall_sum": "cm", "wind_speed_10m_max": "m/s",
     "uv_index_max": "", "weather_code": "wmo code",
 }
+
 HOURLY_FIELDS = {
     "temperature_2m": "°C", "apparent_temperature": "°C",
     "precipitation_probability": "%", "wind_speed_10m": "m/s", "weather_code": "wmo code",
 }
 
 
+# 응답값 검증과 변환
 def _number(value: object, *, minimum: float | None = None, maximum: float | None = None) -> float:
     """필수 숫자 검증: None이면 오류"""
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
@@ -78,6 +94,7 @@ def _arrays(section: dict, fields: dict, length: int) -> None:
             raise ValueError(f"Incomplete array: {field}")
 
 
+# 외부 날씨 제공자
 class OpenMeteoProvider:
     def __init__(
         self,

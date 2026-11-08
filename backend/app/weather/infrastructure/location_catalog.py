@@ -1,17 +1,24 @@
 """검색에서 검증한 지역 식별자와 대표 좌표의 영속 목록."""
 
+
+# 표준 라이브러리
 from contextlib import closing
 from pathlib import Path
 
+# 외부 라이브러리
 from pydantic import TypeAdapter, ValidationError
 
+# 프로젝트 모듈
 from app.common.database import connect_database
 from app.weather.application.exceptions import InvalidWeatherQueryError
 from app.weather.domain.models import Location
 
+
+# JSON 변환·검증
 LOCATION_ADAPTER = TypeAdapter(Location)
 
 
+# 지역 검색 결과 저장소
 class SQLiteLocationCatalog:
     def __init__(self, database_path: Path) -> None:
         """지역 목록 저장 테이블 준비"""

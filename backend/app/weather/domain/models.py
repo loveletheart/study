@@ -1,12 +1,18 @@
 """기상 API와 웹 프레임워크에 의존하지 않는 날씨 데이터와 요약 규칙."""
 
+
+# 표준 라이브러리
 from dataclasses import dataclass
 import re
 from datetime import date, datetime, timedelta, timezone
 from math import isfinite
 
+
+# 시간대
 KST = timezone(timedelta(hours=9), name="Asia/Seoul")
 
+
+# 날씨 코드 설명
 WEATHER_DESCRIPTIONS = {
     0: "맑음", 1: "대체로 맑음", 2: "구름 조금", 3: "흐림",
     45: "안개", 48: "착빙 안개", 51: "약한 이슬비", 53: "이슬비", 55: "강한 이슬비",
@@ -18,6 +24,7 @@ WEATHER_DESCRIPTIONS = {
 }
 
 
+# 도메인 모델
 @dataclass(frozen=True)
 class Coordinates:
     latitude: float
