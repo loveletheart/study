@@ -1,5 +1,6 @@
 """도메인과 애플리케이션에서도 사용할 수 있는 프레임워크 독립 예외."""
 
+# 프로젝트 모듈
 from app.common.errors.codes import ERROR_SPECS, ErrorCode
 
 

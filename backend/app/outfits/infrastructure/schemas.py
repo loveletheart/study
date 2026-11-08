@@ -1,17 +1,23 @@
 """공통·개인화 모델 생성 응답의 검증 스키마."""
 
+
+# 표준 라이브러리
 from datetime import date as Date
 from typing import Annotated
+
+# 외부 라이브러리
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+# 프로젝트 모듈
 from app.outfits.domain.models import OutfitType, validate_clothing_name, validate_outfit_parts
 
 
+# 문자열 검증 타입
 ClothingText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200), AfterValidator(validate_clothing_name)]
-
-
 ExplanationText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
 
+# 검증 모델
 class GeneratedModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

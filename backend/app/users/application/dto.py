@@ -1,8 +1,10 @@
 """HTTP 스키마와 분리한 애플리케이션 입력·출력 데이터."""
 
+# 표준 라이브러리
 from dataclasses import dataclass
 from uuid import UUID
 
+# 프로젝트 모듈
 from app.users.domain.entities import User
 
 

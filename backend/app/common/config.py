@@ -1,5 +1,7 @@
 """환경변수와 .env 파일에서 애플리케이션 설정을 읽는다."""
 
+
+# 표준 라이브러리
 import os
 import math
 from dataclasses import dataclass, field
@@ -7,11 +9,15 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
 
+# 외부 라이브러리
 from dotenv import dotenv_values
 
+
+# 프로젝트 경로
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
+# 애플리케이션 설정
 @dataclass(frozen=True)
 class Settings:
     app_name: str
@@ -41,6 +47,7 @@ class Settings:
     vworld_domain: str = ""
 
 
+# 설정값 검증
 def _number_setting(values: dict, key: str, default: float, minimum: float, maximum: float) -> float:
     """숫자 설정값과 허용 범위 검증"""
     try:
@@ -87,6 +94,7 @@ def _boolean_setting(values: dict, key: str, default: bool = False) -> bool:
     return raw == "true"
 
 
+# 설정 로드
 @lru_cache
 def get_settings() -> Settings:
     """환경변수와 .env 설정 로드"""

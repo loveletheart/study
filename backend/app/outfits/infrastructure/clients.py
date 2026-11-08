@@ -1,18 +1,45 @@
 """Ollama와 Gemini의 모델 호출 및 통신 오류 처리."""
 
-import json, logging, math, re, httpx
+
+# 표준 라이브러리
+import json
+import logging
+import math
+import re
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from app.outfits.application.exceptions import OutfitLlmModelNotFoundError, OutfitLlmResponseError, OutfitLlmTimeoutError, OutfitLlmUnavailableError, OutfitCloudAuthError, OutfitCloudNotConfiguredError, OutfitCloudRateLimitError, OutfitCloudResponseError, OutfitCloudTimeoutError, OutfitCloudUnavailableError
 from time import perf_counter
+
+# 외부 라이브러리
+import httpx
 from google import genai
 from google.genai import errors, types
 
+# 프로젝트 모듈
+from app.outfits.application.exceptions import (
+    OutfitLlmModelNotFoundError,
+    OutfitLlmResponseError,
+    OutfitLlmTimeoutError,
+    OutfitLlmUnavailableError,
+    OutfitCloudAuthError,
+    OutfitCloudNotConfiguredError,
+    OutfitCloudRateLimitError,
+    OutfitCloudResponseError,
+    OutfitCloudTimeoutError,
+    OutfitCloudUnavailableError,
+)
 
+
+# 로그
+logger = logging.getLogger(__name__)
+
+
+# 응답 크기 제한
 MAX_RESPONSE_BYTES = 1_048_576
 
 
+# Ollama API 클라이언트
 class OllamaClient:
     def __init__(
         self, base_url: str, timeout_seconds: float, context_size: int,
@@ -84,9 +111,7 @@ class OllamaClient:
         return content
 
 
-logger = logging.getLogger(__name__)
-
-
+# Gemini API 클라이언트
 class GeminiClient:
     def __init__(self, api_key: str, timeout_seconds: float, max_output_tokens: int) -> None:
         """인증 키와 응답 대기 시간, 출력 토큰 상한을 설정한다."""
@@ -156,6 +181,7 @@ class GeminiClient:
         return _output_text(response)
 
 
+# 오류와 응답 처리 보조 함수
 def _api_unavailable_message(status: int) -> str:
     """우리 서버의 공통 503 응답과 Gemini가 반환한 원래 HTTP 상태를 구분한다."""
     reason = {

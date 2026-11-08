@@ -1,7 +1,9 @@
 """API 요청과 응답의 형식. 업무 규칙은 domain에서 검증한다."""
 
+# 표준 라이브러리
 from uuid import UUID
 
+# 외부 라이브러리
 from pydantic import BaseModel, ConfigDict, Field
 
 

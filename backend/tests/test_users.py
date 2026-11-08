@@ -1,12 +1,15 @@
 """실제 SQLite DB로 저장·중복·롤백 동작을 검증한다."""
 
+# 표준 라이브러리
 import tempfile
 import unittest
 from pathlib import Path
 from uuid import uuid4
 
+# 외부 라이브러리
 from fastapi import Response
 
+# 프로젝트 모듈
 from app.common.database import initialize_database
 from app.users.application.dto import CreateUserCommand
 from app.users.application.exceptions import UserNotFoundError

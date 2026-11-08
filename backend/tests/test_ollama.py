@@ -1,5 +1,6 @@
 """실제 모델 없이 로컬 LLM 요청·응답 검증과 오류 처리 확인."""
 
+# 표준 라이브러리
 import io
 import json
 import os
@@ -11,14 +12,19 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 
+# 외부 라이브러리
 from fastapi import Request
 
+# 프로젝트 모듈
 from app.common.config import Settings, get_settings
 from app.common.errors.handlers import handle_app_error
 from app.outfits.application.dto import GeneratedOutfits
 from app.outfits.application.exceptions import (
-    OutfitLlmModelNotFoundError, OutfitLlmNotConfiguredError, OutfitLlmResponseError,
-    OutfitLlmTimeoutError, OutfitLlmUnavailableError,
+    OutfitLlmModelNotFoundError,
+    OutfitLlmNotConfiguredError,
+    OutfitLlmResponseError,
+    OutfitLlmTimeoutError,
+    OutfitLlmUnavailableError,
 )
 from app.outfits.application.services import OutfitService
 from app.outfits.bootstrap import get_outfit_service

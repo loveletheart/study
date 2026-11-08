@@ -1,3 +1,4 @@
+# 프로젝트 모듈
 from app.outfits.application.dto import OutfitCoordinates, OutfitForecast
 from app.outfits.application.exceptions import OutfitForecastError
 from app.outfits.domain.models import OutfitWeather

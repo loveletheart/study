@@ -1,23 +1,36 @@
 """로컬 우선과 허용된 실패의 클라우드 전환 정책."""
 
+
+# 표준 라이브러리
 import logging
 from collections.abc import Callable
 from dataclasses import replace
+
+# 프로젝트 모듈
 from app.outfits.application.dto import GeneratedOutfits
-from app.outfits.application.exceptions import OutfitLlmModelNotFoundError, OutfitLlmNotConfiguredError, OutfitLlmResponseError, OutfitLlmTimeoutError, OutfitLlmUnavailableError
+from app.outfits.application.exceptions import (
+    OutfitLlmModelNotFoundError,
+    OutfitLlmNotConfiguredError,
+    OutfitLlmResponseError,
+    OutfitLlmTimeoutError,
+    OutfitLlmUnavailableError,
+)
 from app.outfits.application.ports import OutfitRecommender
 from app.outfits.domain.models import OutfitWeather
 
 
+# 로그
 logger = logging.getLogger(__name__)
 
 
+# 클라우드 자동 전환 대상 오류
 FALLBACK_ERRORS = (
     OutfitLlmNotConfiguredError, OutfitLlmModelNotFoundError, OutfitLlmUnavailableError,
     OutfitLlmTimeoutError, OutfitLlmResponseError,
 )
 
 
+# 로컬 우선 추천 정책
 class FallbackOutfitRecommender:
     def __init__(
         self, local: Callable[[], OutfitRecommender], cloud: Callable[[], OutfitRecommender],

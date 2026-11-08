@@ -1,5 +1,6 @@
 """모의 로컬 LLM으로 날씨 연결과 옷차림 응답 검증."""
 
+# 표준 라이브러리
 import copy
 import json
 import unittest
@@ -7,9 +8,11 @@ from dataclasses import replace
 from datetime import date, datetime, timezone
 from unittest.mock import Mock
 
+# 외부 라이브러리
 from fastapi import Request
 from pydantic import TypeAdapter, ValidationError
 
+# 프로젝트 모듈
 from app.common.errors.handlers import handle_app_error
 from app.outfits.application.exceptions import OutfitForecastError
 from app.outfits.application.services import OutfitService

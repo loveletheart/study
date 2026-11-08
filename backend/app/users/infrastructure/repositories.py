@@ -1,8 +1,10 @@
 """사용자 저장소의 SQLite 구현. 커밋은 하지 않는다."""
 
+# 표준 라이브러리
 import sqlite3
 from uuid import UUID
 
+# 프로젝트 모듈
 from app.users.domain.entities import User
 from app.users.domain.exceptions import DuplicateEmailError
 from app.users.infrastructure.models import user_from_row

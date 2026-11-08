@@ -1,6 +1,11 @@
 """공통·개인 추천과 생성 대상을 SQLite에 보관한다."""
 
-import logging, hashlib, json
+
+# 표준 라이브러리
+import logging
+import hashlib
+import json
+from _thread import LockType
 from collections.abc import Callable
 from contextlib import closing
 from datetime import datetime
@@ -8,25 +13,55 @@ from pathlib import Path
 from threading import Event, Lock
 from time import perf_counter
 from weakref import WeakValueDictionary
-from pydantic import TypeAdapter, ValidationError
-from app.common.database import connect_database
-from app.outfits.application.dto import TodayOutfitResult, WeeklyOutfitResult, GeneratedOutfits, PersonalizedOutfits
-from app.outfits.application.exceptions import OutfitForecastError, WeeklyOutfitNotReadyError, OutfitLlmResponseError
-from app.outfits.application.services import OutfitService
-from app.weather.domain.models import KST
+from typing import Literal, overload
 from dataclasses import asdict
 from uuid import uuid4
+
+# 외부 라이브러리
+from pydantic import TypeAdapter, ValidationError
+
+# 프로젝트 모듈
+from app.common.database import connect_database
+from app.outfits.application.dto import (
+    TodayOutfitResult,
+    WeeklyOutfitResult,
+    GeneratedOutfits,
+    PersonalizedOutfits,
+)
+from app.outfits.application.exceptions import (
+    OutfitForecastError,
+    WeeklyOutfitNotReadyError,
+    OutfitLlmResponseError,
+)
+from app.outfits.application.services import OutfitService
+from app.weather.domain.models import KST
 from app.outfits.application.ports import OutfitPersonalizer
 from app.outfits.domain.models import OutfitPreferences
-from app.weather.application.ports import LocationCatalog
+from app.weather.application.ports import LocationReader
 
 
+# 로그
 logger = logging.getLogger(__name__)
 
 
-RESULT_ADAPTERS = {"today": TypeAdapter(TodayOutfitResult), "weekly": TypeAdapter(WeeklyOutfitResult)}
+# 캐시 키와 결과 타입
+OutfitResult = TodayOutfitResult | WeeklyOutfitResult
+CacheKey = tuple[str, str, float, float]
 
 
+# JSON 변환·검증
+TODAY_ADAPTER = TypeAdapter(TodayOutfitResult)
+WEEKLY_ADAPTER = TypeAdapter(WeeklyOutfitResult)
+
+RESULT_ADAPTERS: dict[str, TypeAdapter[TodayOutfitResult] | TypeAdapter[WeeklyOutfitResult]] = {
+    "today": TODAY_ADAPTER, "weekly": WEEKLY_ADAPTER,
+}
+
+PERSONAL_ADAPTER = TypeAdapter(PersonalizedOutfits)
+PREFERENCES_ADAPTER = TypeAdapter(OutfitPreferences)
+
+
+# 테이블 생성 SQL
 CREATE_CACHE_TABLE = """
 CREATE TABLE IF NOT EXISTS outfit_result_cache (
     scope TEXT NOT NULL,
@@ -43,6 +78,15 @@ CREATE TABLE IF NOT EXISTS outfit_result_cache (
 """
 
 
+# 결과 직렬화
+def _dump_result(result: OutfitResult) -> bytes:
+    """결과의 실제 타입에 맞는 어댑터로 직렬화한다."""
+    if isinstance(result, TodayOutfitResult):
+        return TODAY_ADAPTER.dump_json(result)
+    return WEEKLY_ADAPTER.dump_json(result)
+
+
+# 공통 추천 캐시
 class CachedOutfitService:
     def __init__(
         self, database_path: Path, scope: str, service_factory: Callable[[], OutfitService],
@@ -62,7 +106,7 @@ class CachedOutfitService:
         self._weekly_batch_hour = weekly_batch_hour
         self._weekly_max_age_seconds = weekly_max_age_seconds
         self._clock = clock or (lambda: datetime.now(KST))
-        self._generation_locks = WeakValueDictionary()
+        self._generation_locks: WeakValueDictionary[CacheKey, LockType] = WeakValueDictionary()
         self._generation_locks_guard = Lock()
         with closing(connect_database(database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -93,17 +137,17 @@ class CachedOutfitService:
 
     def get_region_today(self, location_id: int, latitude: float, longitude: float) -> TodayOutfitResult:
         """지역 식별자·대표 좌표별 공통 오늘 추천 조회"""
-        return self._get(f"region:{location_id}:today", latitude, longitude)
+        return self._get("today", latitude, longitude, location_id)
 
     def get_region_weekly(self, location_id: int, latitude: float, longitude: float) -> WeeklyOutfitResult:
         """지역 식별자·대표 좌표별 공통 주간 추천 조회"""
-        return self._get(f"region:{location_id}:weekly", latitude, longitude)
+        return self._get("weekly", latitude, longitude, location_id)
 
-    def _key(self, kind: str, latitude: float, longitude: float) -> tuple:
+    def _key(self, kind: str, latitude: float, longitude: float) -> CacheKey:
         """제공사 설정·조회 종류·정확한 좌표로 저장 키 구성"""
         return self._scope, kind, latitude, longitude
 
-    def _lock_for(self, key: tuple):
+    def _lock_for(self, key: CacheKey) -> LockType:
         """동일 키의 생성 잠금을 공유하고 사용자·대기자가 없으면 자동 회수"""
         with self._generation_locks_guard:
             generation_lock = self._generation_locks.get(key)
@@ -112,9 +156,22 @@ class CachedOutfitService:
                 self._generation_locks[key] = generation_lock
             return generation_lock
 
-    def _get(self, kind: str, latitude: float, longitude: float):
+    @overload
+    def _get(
+        self, kind: Literal["today"], latitude: float, longitude: float, location_id: int | None = None,
+    ) -> TodayOutfitResult: ...
+
+    @overload
+    def _get(
+        self, kind: Literal["weekly"], latitude: float, longitude: float, location_id: int | None = None,
+    ) -> WeeklyOutfitResult: ...
+
+    def _get(
+        self, kind: Literal["today", "weekly"], latitude: float, longitude: float, location_id: int | None = None,
+    ) -> OutfitResult:
         """동시 최초 요청은 한 번만 생성하고 갱신 중에는 기존 결과 제공"""
-        key = self._key(kind, latitude, longitude)
+        cache_kind = kind if location_id is None else f"region:{location_id}:{kind}"
+        key = self._key(cache_kind, latitude, longitude)
         with closing(connect_database(self._database_path)) as connection, connection:
             connection.execute(
                 "INSERT INTO outfit_result_cache (scope, kind, latitude, longitude, requested_at) VALUES (?, ?, ?, ?, ?) "
@@ -137,7 +194,7 @@ class CachedOutfitService:
                 return cached
             return self._generate(key)
 
-    def _read(self, key: tuple):
+    def _read(self, key: CacheKey) -> OutfitResult | None:
         """한국 날짜가 같고 세 번의 갱신 주기 이내인 정상 결과만 사용"""
         with closing(connect_database(self._database_path)) as connection:
             row = connection.execute(
@@ -159,7 +216,7 @@ class CachedOutfitService:
             return None
         return result
 
-    def _generate(self, key: tuple, record_attempt: bool = True):
+    def _generate(self, key: CacheKey, record_attempt: bool = True) -> OutfitResult:
         """시도 시각을 기록하고 성공한 결과만 원자적으로 교체"""
         if record_attempt:
             with closing(connect_database(self._database_path)) as connection, connection:
@@ -171,13 +228,26 @@ class CachedOutfitService:
         service = self._service_factory()
         kind, latitude, longitude = key[1].rsplit(":", 1)[-1], key[2], key[3]
         previous = self._read(key) if self._reuse_unchanged_weather else None
-        if previous is None:
-            result = getattr(service, "get_" + kind)(latitude, longitude)
+        result: OutfitResult
+        if kind == "today":
+            if previous is None:
+                result = service.get_today(latitude, longitude)
+            elif isinstance(previous, TodayOutfitResult):
+                result = service.refresh_today(latitude, longitude, previous)
+            else:
+                raise OutfitForecastError()
+        elif kind == "weekly":
+            if previous is None:
+                result = service.get_weekly(latitude, longitude)
+            elif isinstance(previous, WeeklyOutfitResult):
+                result = service.refresh_weekly(latitude, longitude, previous)
+            else:
+                raise OutfitForecastError()
         else:
-            result = getattr(service, "refresh_" + kind)(latitude, longitude, previous)
+            raise ValueError("지원하지 않는 추천 조회 종류입니다.")
         if result.forecast.today != self._clock().astimezone(KST).date():
             raise OutfitForecastError()
-        payload = RESULT_ADAPTERS[kind].dump_json(result)
+        payload = _dump_result(result)
         with closing(connect_database(self._database_path)) as connection, connection:
             connection.execute(
                 "UPDATE outfit_result_cache SET payload=?, updated_at=? "
@@ -186,7 +256,9 @@ class CachedOutfitService:
             )
         return result
 
-    def prepare_region(self, location_id: int, kind: str, latitude: float, longitude: float, lead_seconds: float):
+    def prepare_region(
+        self, location_id: int, kind: str, latitude: float, longitude: float, lead_seconds: float,
+    ) -> tuple[float, OutfitResult | None] | None:
         """공통 갱신 기한 전 새 날씨와 기본 버전을 준비하되 정규 갱신 주기는 유지"""
         if kind not in RESULT_ADAPTERS:
             raise ValueError("지원하지 않는 추천 조회 종류입니다.")
@@ -346,16 +418,11 @@ class CachedOutfitService:
         }
 
 
-PERSONAL_ADAPTER = TypeAdapter(PersonalizedOutfits)
-
-
-PREFERENCES_ADAPTER = TypeAdapter(OutfitPreferences)
-
-
+# 개인화 추천 캐시
 class SQLitePersonalizedOutfitCache:
     def __init__(
         self, database_path: Path, scope: str, personalizer: OutfitPersonalizer,
-        common: CachedOutfitService, locations: LocationCatalog, lead_seconds: float = 600,
+        common: CachedOutfitService, locations: LocationReader, lead_seconds: float = 600,
         clock: Callable[[], datetime] | None = None, max_entries: int = 4096,
         weekly_batch_only: bool = False,
     ) -> None:
@@ -369,7 +436,7 @@ class SQLitePersonalizedOutfitCache:
         self._clock = clock or (lambda: datetime.now(KST))
         self._max_entries = max_entries
         self._weekly_batch_only = weekly_batch_only
-        self._locks = WeakValueDictionary()
+        self._locks: WeakValueDictionary[str, LockType] = WeakValueDictionary()
         self._guard = Lock()
         with closing(connect_database(database_path)) as connection, connection:
             connection.execute(
@@ -382,7 +449,7 @@ class SQLitePersonalizedOutfitCache:
                 "kind TEXT NOT NULL, preferences BLOB NOT NULL, requested_at REAL NOT NULL, attempted_slot REAL NOT NULL DEFAULT 0)",
             )
 
-    def _lock_for(self, key: str):
+    def _lock_for(self, key: str) -> LockType:
         """동일 생성 조합에만 잠금을 걸고 사용 종료 후 자동 회수"""
         with self._guard:
             generation_lock = self._locks.get(key)
@@ -419,11 +486,17 @@ class SQLitePersonalizedOutfitCache:
         preferences: OutfitPreferences, register: bool = True, from_weekly_batch: bool = False,
     ) -> tuple[PersonalizedOutfits, bool]:
         """주간은 준비된 개인 결과만 제공하고 오늘의 최초 조합은 동적 생성"""
+        if kind == "today" and isinstance(base, TodayOutfitResult):
+            recommendations = (base.recommendation,)
+        elif kind == "weekly" and isinstance(base, WeeklyOutfitResult):
+            recommendations = base.daily
+        else:
+            raise OutfitForecastError()
         if register:
             profile_key = self.register(location_id, kind, preferences)
         else:
             profile_key = self._profile_key(location_id, kind, preferences)
-        base_version = base.base_version or hashlib.sha256(RESULT_ADAPTERS[kind].dump_json(base)).hexdigest()
+        base_version = base.base_version or hashlib.sha256(_dump_result(base)).hexdigest()
         cache_key = hashlib.sha256((profile_key + base_version).encode()).hexdigest()
         with self._lock_for(cache_key):
             with closing(connect_database(self._database_path)) as connection:
@@ -437,7 +510,6 @@ class SQLitePersonalizedOutfitCache:
                     pass
             if self._weekly_batch_only and kind == "weekly" and not from_weekly_batch:
                 raise WeeklyOutfitNotReadyError()
-            recommendations = (base.recommendation,) if kind == "today" else base.daily
             generated = self._personalizer.personalize(GeneratedOutfits(recommendations, base.engine), preferences)
             if tuple(item.weather for item in generated.recommendations) != tuple(item.weather for item in recommendations):
                 raise OutfitLlmResponseError()
