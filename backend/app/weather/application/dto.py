@@ -9,6 +9,10 @@ from app.weather.domain.models import DailyForecast, HourlyForecast, Location, W
 class LocationSearchResult:
     locations: tuple[Location, ...]
     attribution: str = "Location data by Open-Meteo and GeoNames"
+    total: int | None = None
+    offset: int = 0
+    limit: int = 5
+    has_more: bool = False
 
 
 @dataclass(frozen=True)

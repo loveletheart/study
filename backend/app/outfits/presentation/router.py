@@ -23,7 +23,7 @@ from app.outfits.presentation.schemas import (
     NeighborhoodWeeklyResponse,
 )
 from app.outfits.application.services import RegionOutfitService
-from app.outfits.domain.models import Activity, ColdSensitivity, OutfitPreferences, OutfitStyle
+from app.outfits.domain.models import Activity, ColdSensitivity, OutfitPreferences, OutfitStyle, ClothingPreference, AvoidItem
 
 
 # 라우터 설정

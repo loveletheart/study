@@ -295,7 +295,7 @@ class RegionTests(unittest.TestCase):
         self.assertEqual(request["output_schema"], self.personal_llm.chat.call_args.args[2])
         self.assertEqual(len(request["look_examples"]), 2)
         self.assertNotIn("shared_recommendations", request)
-        self.assertEqual(personal.personalization.generated.engine.prompt_version, "2.4")
+        self.assertEqual(personal.personalization.generated.engine.prompt_version, "2.5")
 
     def test_explicit_personal_conditions_have_distinct_meanings_without_changing_weather(self):
         """각 선택값의 의미를 명시하면서 원본 날씨와 출력 계약을 유지한다."""

@@ -1,6 +1,6 @@
 # FastAPI와 DDD 학습 프로젝트
 
-업무별로 폴더를 나누고, 각 업무 내부를 presentation / application / domain / infrastructure 계층으로 구성합니다. 현재는 날씨 조회, 날씨 기반 옷차림 추천과 사용자 등록·단건 조회 예시를 구현했습니다. 비밀번호·로그인·인증은 포함하지 않습니다.
+업무별로 폴더를 나누고, 각 업무 내부를 presentation / application / domain / infrastructure 계층으로 구성합니다. 날씨 조회, 옷차림 추천, 이메일·비밀번호 회원가입과 로그인, 계정별 추천 프로필을 제공합니다.
 
 ## 실행
 
@@ -31,13 +31,31 @@ VS Code에서는 **Ctrl+Shift+B**로 같은 실행 절차를 사용할 수 있�
 - Swagger: http://127.0.0.1:8000/docs
 - 상태 확인: http://127.0.0.1:8000/health
 
+## 프론트엔드 MVP
+
+Vue 기반 **온도 — 날씨를 입는 일상** 화면에서 지역 검색, 현재·시간별 날씨, 오늘·7일 옷차림과 개인 취향 설정을 사용할 수 있습니다. 둘러보기는 브라우저에 설정을 저장하고, 로그인하면 지역·체감 온도·스타일·활동·선호 의류·피할 의류를 계정에 저장합니다.
+
+백엔드를 실행한 상태에서 별도 터미널로 아래 명령을 실행합니다.
+
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
+
+화면: http://127.0.0.1:5173/app/
+
+`frontend`에서 `npm run build` 후 백엔드를 재시작하면 http://127.0.0.1:8000/app/ 에서 화면과 API를 함께 제공합니다. Node.js 요구사항, 다른 포트 연결, 브라우저 시험과 주간 추천 준비 상태는 [프론트엔드 문서](frontend/README.md)를 확인하세요.
+
+회원가입은 `/app/#signup`, 로그인은 `/app/#login`, 추천 프로필은 `/app/#profile`에서 제공합니다. 회원가입 뒤 프로필 설정으로 이동하며 언제든 나중에 설정할 수 있습니다. 계정 저장·인증 API와 기존 사용자 데이터의 호환 범위는 [사용자 기능 문서](backend/app/users/README.md)를 확인하세요.
+
 ## 날씨 API
 
-Python 코드는 `backend/`에 있고, `.venv`, `.env`, 실행 스크립트와 기존 `study.db`는 프로젝트 루트에 있습니다. 프론트엔드는 이후 Vue로 연결합니다.
+Python 코드는 `backend/`, Vue 화면은 `frontend/`에 있고, `.venv`, `.env`, 실행 스크립트와 기존 `study.db`는 프로젝트 루트에 있습니다.
 
 | API | 역할 |
 | --- | --- |
-| `GET /api/v1/weather/locations?query=서울` | 국내 지역 검색 |
+| `GET /api/v1/weather/locations?query=서울` | 국내 지역 포함 검색. `limit`·`offset`으로 전체 결과 페이지 조회 |
 | `GET /api/v1/weather/today?latitude=37.5665&longitude=126.978` | 현재 날씨, 오늘 예보, 시간별 정보와 요약 |
 | `GET /api/v1/weather/weekly?latitude=37.5665&longitude=126.978` | 오늘부터 7일 예보 |
 
@@ -202,6 +220,10 @@ Swagger에서 `POST /api/v1/users`를 실행합니다.
 ```
 
 테스트마다 임시 DB를 만들고 종료 시 정리하므로 실제 `study.db`에 테스트 데이터를 남기지 않습니다.
+
+## 오답 수정과 학습자료 수집
+
+추천 화면에서 로그인 후 답변을 신고·수정하고, **내 수정안 검수**에서 승인한 정답만 내보낼 수 있습니다. 원본 보존, 검수 기준과 운영 도구는 [FEEDBACK.md](FEEDBACK.md)를 참고하세요.
 
 ## 다음 업무 추가
 

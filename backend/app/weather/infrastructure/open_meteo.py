@@ -108,7 +108,7 @@ class OpenMeteoProvider:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def search_locations(self, query: str, limit: int) -> tuple[Location, ...]:
-        """캐시를 이용해 지역 검색"""
+        """외부 제공사 직접 검색의 호환 경로. 운영 부분 검색은 국내 SQLite 색인 사용."""
         return self._cache.get_or_load(
             ("locations", query.casefold(), limit), lambda: self._load_locations(query, limit)
         )

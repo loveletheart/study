@@ -11,8 +11,10 @@ from app.common.errors.openapi import error_responses
 from app.common.responses import ApiResponse
 from app.users.application.dto import CreateUserCommand
 from app.users.application.services import UserService
-from app.users.bootstrap import get_user_service
-from app.users.presentation.schemas import CreateUserRequest, UserResponse
+from app.users.bootstrap import get_user_service, get_auth_service
+from app.users.application.services import AuthService
+from app.users.application.exceptions import AuthorizationError
+from app.users.presentation.schemas import CreateUserRequest, UserResponse, LoginRequest, RegisterRequest, ProfileRequest, AccountResponse
 
 
 # 라우터 설정
@@ -47,9 +49,10 @@ def create_user(
 
 @router.get(
     "/{user_id}",
+    dependencies=[Depends(require_owner), Depends(private_response)],
     response_model=ApiResponse[UserResponse],
     summary="사용자 단건 조회",
-    description="사용자 UUID로 이름과 이메일을 조회합니다.",
+    description="로그인한 본인의 UUID로 이름과 이메일을 조회합니다.",
     response_description="UUID에 해당하는 사용자 정보",
     operation_id="get_user",
     responses=error_responses(ErrorCode.USER_NOT_FOUND),
