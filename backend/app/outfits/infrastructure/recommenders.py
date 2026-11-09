@@ -34,7 +34,6 @@ from app.outfits.infrastructure.prompts import (
     PERSONALIZATION_INSTRUCTION,
     _personal_requirements,
 )
-from app.outfits.infrastructure.clients import OllamaClient, GeminiClient
 from app.outfits.application.ports import OutfitRecommender
 from app.outfits.domain.quality import check_day
 
@@ -69,7 +68,8 @@ class StructuredOutfitRecommender:
         self._response_error = response_error
         self._repair_attempts = min(max(repair_attempts, 0), 1)
 
-    def _generate(self, days, schema):
+    def _generate(self, days: tuple[OutfitWeather, ...], schema: dict) -> GeneratedResponse:
+        """검증한 응답을 반환하고 허용한 수정 횟수를 넘으면 업무 예외를 발생시킨다."""
         messages = build_messages(days, schema)
         for attempt in range(self._repair_attempts + 1):
             content = self._client.chat(self._model, messages, schema)
@@ -91,6 +91,7 @@ class StructuredOutfitRecommender:
                     '위 문제를 수정한 최종 추천만 JSON으로 반환하세요. 검사 지시문 자체를 추천 이유에 쓰지 마세요.',
                 ]
                 messages[1] = {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False, allow_nan=False)}
+        raise self._response_error()
 
     def recommend(self, days: tuple[OutfitWeather, ...]) -> GeneratedOutfits:
         """날씨를 한 번에 전달하고 생성 결과의 날짜·내용 검증"""
@@ -100,9 +101,14 @@ class StructuredOutfitRecommender:
         schema["properties"]["days"].update(minItems=len(days), maxItems=len(days))
         schema["$defs"]["GeneratedDay"]["properties"]["date"]["enum"] = [day.date.isoformat() for day in days]
         generated = self._generate(days, schema)
-        recommendations = []
-        if generated is None or not generated.days:
+        if (
+            generated is None or not hasattr(generated, 'days')
+            or generated.days is None or not generated.days
+        ):
             raise self._response_error()
+
+        recommendations = []
+
         for weather, day in zip(days, generated.days):
             best, worst = _look(day.best), _look(day.worst)
             if (
@@ -132,13 +138,13 @@ class StructuredOutfitRecommender:
 
 
 class OllamaOutfitRecommender(StructuredOutfitRecommender):
-    def __init__(self, client: OllamaClient, model: str, *, repair_attempts: int = 0) -> None:
+    def __init__(self, client: StructuredChatClient, model: str, *, repair_attempts: int = 0) -> None:
         """Ollama 응답에 공통 추천 검증 적용"""
         super().__init__(client, model, "ollama", repair_attempts=repair_attempts)
 
 
 class GeminiOutfitRecommender(StructuredOutfitRecommender):
-    def __init__(self, client: GeminiClient, model: str) -> None:
+    def __init__(self, client: StructuredChatClient, model: str) -> None:
         """Gemini 응답에 공통 옷차림 검증과 클라우드 오류 처리를 적용한다."""
         super().__init__(client, model, "gemini", OutfitCloudResponseError, OutfitCloudNotConfiguredError)
 

@@ -61,18 +61,22 @@ def _local_recommender(
         thinking=settings.llm_thinking,
         **_sampling_options(settings),
     )
+    recorded = RecordingChatClient(client, feedback_store_for_path(settings.database_path), "ollama")
     if preferences is None:
-        return OllamaOutfitRecommender(client, settings.llm_model)
-    return StructuredOutfitRecommender(PersonalizationChatClient(client, preferences), settings.llm_model, "ollama")
+        return OllamaOutfitRecommender(recorded, settings.llm_model, repair_attempts=1)
+    return StructuredOutfitRecommender(
+        PersonalizationChatClient(recorded, preferences), settings.llm_model, "ollama", repair_attempts=1,
+    )
 
 
 def _cloud_recommender(settings: Settings, preferences: OutfitPreferences | None = None) -> OutfitRecommender:
     """클라우드 전환 시에만 Gemini 설정을 확인하고 추천 구현을 생성한다."""
     client = GeminiClient(settings.gemini_api_key, settings.gemini_timeout_seconds, settings.gemini_max_output_tokens)
+    recorded = RecordingChatClient(client, feedback_store_for_path(settings.database_path), "gemini")
     if preferences is None:
-        return GeminiOutfitRecommender(client, settings.gemini_model)
+        return GeminiOutfitRecommender(recorded, settings.gemini_model)
     return StructuredOutfitRecommender(
-        PersonalizationChatClient(client, preferences), settings.gemini_model, "gemini",
+        PersonalizationChatClient(recorded, preferences), settings.gemini_model, "gemini",
         OutfitCloudResponseError, OutfitCloudNotConfiguredError,
     )
 
