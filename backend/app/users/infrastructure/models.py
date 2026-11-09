@@ -19,6 +19,13 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """
 
+AUTH_TABLES = (
+    "CREATE TABLE IF NOT EXISTS user_credentials (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, password_hash TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS user_sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at REAL NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS user_recommendation_profiles (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, payload BLOB NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS auth_rate_limits (bucket TEXT PRIMARY KEY, window_start REAL NOT NULL, attempts INTEGER NOT NULL)",
+)
+
 # 검증 테스트
 def user_from_row(row: sqlite3.Row) -> User:
     """DB 조회 행을 사용자 객체로 변환"""

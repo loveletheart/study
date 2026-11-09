@@ -13,7 +13,7 @@ from app.outfits.application.dto import (
     WeeklyOutfitResult,
     RegionOutfitResult,
 )
-from app.outfits.domain.models import OutfitType, TemperatureBasis, Activity, ColdSensitivity, OutfitStyle
+from app.outfits.domain.models import OutfitType, TemperatureBasis, Activity, ColdSensitivity, OutfitStyle, ClothingPreference, AvoidItem
 from app.weather.presentation.schemas import LocationResponse
 
 

@@ -32,6 +32,7 @@ from app.common.errors.handlers import register_exception_handlers
 from app.common.errors.openapi import error_code_table, error_responses
 from app.common.responses import ApiResponse
 from app.outfits.presentation.router import router as outfits_router
+from app.outfits.presentation.feedback_router import router as outfit_feedback_router
 from app.outfits.bootstrap import (
     get_cached_outfit_service,
     get_personalized_outfit_cache,

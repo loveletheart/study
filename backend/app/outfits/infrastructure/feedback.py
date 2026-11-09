@@ -3,10 +3,9 @@ import hashlib
 import json
 import logging
 from contextlib import closing
-from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Lock
+from threading import Lock, local
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -252,17 +251,22 @@ class SQLiteFeedbackStore:
 
 
 class RecordingChatClient:
+    """동기 모델 호출의 원본을 기록하고 생성 식별자를 인스턴스·스레드별로 격리한다."""
+
     def __init__(self, client, store, provider, *, source_kind='app_request'):
+        """장기 실행 스레드의 컨텍스트에 누적되지 않는 기록 상태를 준비한다."""
         self.client, self.store, self.provider = client, store, provider
         self.source_kind = source_kind
-        self._last_generation_id = ContextVar('outfit_generation_id', default=None)
+        self._local = local()
 
     @property
     def last_generation_id(self):
-        return self._last_generation_id.get()
+        """현재 스레드에서 이 클라이언트가 마지막으로 저장한 생성 식별자를 반환한다."""
+        return getattr(self._local, 'generation_id', None)
 
     def chat(self, model, messages, schema):
-        self._last_generation_id.set(None)
+        """이전 기록을 비우고 성공 응답이나 전송 오류의 원본을 저장한다."""
+        self._local.generation_id = None
         try:
             result = self.client.chat(model, messages, schema)
         except Exception as error:
@@ -272,7 +276,8 @@ class RecordingChatClient:
         return result
 
     def _record(self, model, messages, schema, result, error_type=None):
+        """원본 저장에 성공한 경우에만 현재 스레드의 생성 식별자를 갱신한다."""
         try:
-            self._last_generation_id.set(self.store.capture(model, self.provider, messages, schema, result, source_kind=self.source_kind, error_type=error_type))
+            self._local.generation_id = self.store.capture(model, self.provider, messages, schema, result, source_kind=self.source_kind, error_type=error_type)
         except Exception as error:
             logger.warning('추천 검수용 원본 기록 저장 실패: cause=%s', type(error).__name__)

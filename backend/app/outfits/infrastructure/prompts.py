@@ -6,13 +6,13 @@ import json
 from dataclasses import asdict
 
 # 프로젝트 모듈
-from app.outfits.domain.models import OutfitWeather, Activity, ColdSensitivity, OutfitPreferences, OutfitStyle
+from app.outfits.domain.models import OutfitWeather, Activity, ColdSensitivity, OutfitPreferences, OutfitStyle, ClothingPreference, AvoidItem
 from app.outfits.domain.rules import temperature_reference
 
 
 # 프롬프트 버전
 PROMPT_VERSION = "2.2"
-PERSONALIZATION_VERSION = "2.4"
+PERSONALIZATION_VERSION = "2.5"
 
 
 # 기본 추천 프롬프트

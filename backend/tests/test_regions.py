@@ -417,6 +417,23 @@ class RegionTests(unittest.TestCase):
         self.personal_llm.chat.assert_called_once()
 
 
+    def test_http_preserves_selected_clothing_and_avoid_preferences_in_model_input(self):
+        previous = app.dependency_overrides.copy()
+        self.addCleanup(lambda: (app.dependency_overrides.clear(), app.dependency_overrides.update(previous)))
+        app.dependency_overrides[get_region_outfit_service] = lambda: self.service
+        client = TestClient(app)
+        self.addCleanup(client.close)
+        response = client.get('/api/v1/outfits/regions/1001/today', params=[
+            ('clothing_preference', 'menswear'), ('avoid_items', 'sandals'), ('avoid_items', 'shorts'),
+        ])
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = json.loads(self.personal_llm.chat.call_args.args[1][1]['content'])
+        self.assertEqual(payload['preferences']['clothing_preference'], 'menswear')
+        self.assertEqual(set(payload['preferences']['avoid_items']), {'sandals', 'shorts'})
+        self.assertIn('선호_의류', payload['personal_requirements'])
+        self.assertIn('피할_의류', payload['personal_requirements'])
+
+
 class SharedCapacitySettingsTests(unittest.TestCase):
     def test_shared_capacity_defaults_and_validation(self):
         """지역 공유 보관량을 설정할 수 있고 잘못된 용량은 거부한다."""

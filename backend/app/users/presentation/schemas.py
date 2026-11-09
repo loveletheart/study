@@ -5,7 +5,10 @@ from uuid import UUID
 from typing import Annotated
 
 # 외부 라이브러리
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, StringConstraints
+from app.outfits.domain.models import Activity, AvoidItem, ClothingPreference, ColdSensitivity, OutfitPreferences, OutfitStyle
+from app.users.application.dto import AccountDTO, RecommendationProfile
+from app.weather.presentation.schemas import LocationResponse
 
 
 class CreateUserRequest(BaseModel):

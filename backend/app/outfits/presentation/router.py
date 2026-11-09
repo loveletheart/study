@@ -66,9 +66,11 @@ def get_preferences(
     cold_sensitivity: Annotated[ColdSensitivity, Query(description="normal: 보통, cold: 추위를 많이 탐, warm: 더위를 많이 탐")] = ColdSensitivity.NORMAL,
     style: Annotated[OutfitStyle, Query(description="default: 기본, casual: 편안함, formal: 단정함")] = OutfitStyle.DEFAULT,
     activity: Annotated[Activity, Query(description="daily: 일상, outdoor: 야외, active: 활동량 많음")] = Activity.DAILY,
+    clothing_preference: Annotated[ClothingPreference, Query(description="any: 제한 없음, menswear: 남성복 위주, womenswear: 여성복 위주")] = ClothingPreference.ANY,
+    avoid_items: Annotated[list[AvoidItem] | None, Query(max_length=6, description="추천에서 피할 의류. 같은 이름의 쿼리로 여러 항목 전달")] = None,
 ) -> OutfitPreferences:
     """개인 조건은 요청으로 받고 공통 추천 캐시 키에는 포함하지 않는다."""
-    return OutfitPreferences(cold_sensitivity, style, activity)
+    return OutfitPreferences(cold_sensitivity, style, activity, clothing_preference, tuple(avoid_items or ()))
 
 
 # 개인화 의존성: 조건 변환 함수 정의 후 생성

@@ -2,6 +2,9 @@ import copy
 import json
 import tempfile
 import unittest
+from contextvars import copy_context
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import Mock
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -219,6 +222,39 @@ class FeedbackTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as executor:
             self.assertTrue(all(executor.map(execute, (8, 9))))
         self.assertIsNone(recorder.last_generation_id)
+
+    def test_repeated_recorder_creation_does_not_accumulate_worker_context_values(self):
+        """개인화 생성기를 반복 교체해도 장기 실행 스레드의 컨텍스트가 커지지 않는다."""
+        def execute():
+            before = set(copy_context())
+            store = Mock()
+            store.capture.side_effect = [f'generation-{index}' for index in range(50)]
+            client = Mock()
+            client.chat.return_value = 'generated-content'
+            for index in range(50):
+                recorder = RecordingChatClient(client, store, 'ollama')
+                self.assertIsNone(recorder.last_generation_id)
+                recorder.chat('test-model', [], {})
+                self.assertEqual(recorder.last_generation_id, f'generation-{index}')
+            del recorder
+            return set(copy_context()) - before
+
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            self.assertEqual(worker.submit(execute).result(timeout=5), set())
+
+    def test_recorders_keep_independent_generation_identifiers_on_the_same_thread(self):
+        """한 스레드의 여러 추천기가 서로의 마지막 생성 식별자를 덮어쓰지 않는다."""
+        store = Mock()
+        store.capture.side_effect = ['first-generation', 'second-generation']
+        client = Mock()
+        client.chat.return_value = 'generated-content'
+        first = RecordingChatClient(client, store, 'ollama')
+        second = RecordingChatClient(client, store, 'ollama')
+        first.chat('test-model', [], {})
+        self.assertIsNone(second.last_generation_id)
+        second.chat('test-model', [], {})
+        self.assertEqual(first.last_generation_id, 'first-generation')
+        self.assertEqual(second.last_generation_id, 'second-generation')
 
 
 if __name__ == '__main__':
