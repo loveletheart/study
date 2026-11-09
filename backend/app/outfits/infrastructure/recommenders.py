@@ -101,6 +101,8 @@ class StructuredOutfitRecommender:
         schema["$defs"]["GeneratedDay"]["properties"]["date"]["enum"] = [day.date.isoformat() for day in days]
         generated = self._generate(days, schema)
         recommendations = []
+        if generated is None or not generated.days:
+            raise self._response_error()
         for weather, day in zip(days, generated.days):
             best, worst = _look(day.best), _look(day.worst)
             if (
