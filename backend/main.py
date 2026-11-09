@@ -1,4 +1,5 @@
 # 표준 라이브러리
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -91,6 +92,8 @@ app.include_router(outfit_feedback_router, prefix="/api/v1")
 # 개발 서버를 사용할 때나 빌드 전에는 기존 API만 그대로 실행한다.
 frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 if (frontend_dist / "index.html").is_file():
+    # Windows 레지스트리가 .js를 text/plain으로 지정해도 모듈 스크립트로 제공한다.
+    mimetypes.add_type("text/javascript", ".js")
     app.mount("/app", StaticFiles(directory=frontend_dist, html=True), name="frontend")
 
 
