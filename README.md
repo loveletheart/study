@@ -90,7 +90,7 @@ GEMINI_API_KEY=발급받은_API_키
 STUDY_GEMINI_MODEL=gemini-flash-latest
 ```
 
-클라우드는 Google GenAI 공식 Python SDK와 JSON 스키마 출력을 사용합니다. 자동 전환을 켜도 로컬 대기 제한은 `STUDY_LLM_TIMEOUT_SECONDS`(기본 180초)를 유지하며, Gemini는 기본 60초입니다. 로컬 대기를 더 짧게 제한하려는 경우에만 `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS`를 지정하세요. 로컬 모델 미설정도 전환 대상이며, 로컬 성공 시 Gemini 키 확인과 호출을 건너뜁니다. 응답의 `data.engine`에서 실제 제공사·모델·전환 여부를 확인합니다.
+클라우드는 Google GenAI 공식 Python SDK와 JSON 스키마 출력을 사용합니다. 자동 전환을 켜면 Ollama 요청당 기본 20초를 기다립니다. 시간 초과 시 한 번 다시 요청하고, 다시 실패하면 Gemini를 호출합니다. `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS`를 설정하면 해당 값과 `STUDY_LLM_TIMEOUT_SECONDS` 중 작은 값을 적용합니다. Gemini는 기본 60초입니다. 로컬 모델 미설정도 전환 대상이며, 응답의 `data.engine`에서 실제 제공사·모델·전환 여부를 확인합니다.
 
 ## API 설명과 공통 오류
 
@@ -140,7 +140,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `STUDY_LLM_CONTEXT_SIZE` | `16384` | 요청 문맥 길이(2048~131072 정수). 모델·메모리에 맞춰 조절 |
 | `STUDY_LLM_TODAY_CONTEXT_SIZE` | `4096` | 오늘 기본·개인 추천의 문맥 토큰 수. 주간은 일반 문맥 설정 유지 |
 | `STUDY_LLM_CLOUD_FALLBACK_ENABLED` | `false` | `true`일 때 로컬 실패 후 Gemini 한 번 호출 |
-| `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS` | 미설정 | 생략·빈 값이면 일반 로컬 대기 제한 유지. 지정하면 두 제한 중 작은 값 적용(1~600초) |
+| `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS` | 20초 | 자동 전환을 켠 경우 로컬 요청당 적용. 지정값과 일반 로컬 대기 제한 중 작은 값 사용(1~600초) |
 | `STUDY_OUTFIT_REFRESH_SECONDS` | `3600` | 조회한 지역의 추천 갱신 간격(60~86400초). 서버 실행 중 동작 |
 | `STUDY_OUTFIT_CACHE_MAX_ENTRIES` | `4096` | 공통 추천 보관 조합 수(1~100000). 지역·오늘/주간·모델 설정 조합 기준 |
 | `STUDY_OUTFIT_WEEKLY_BATCH_HOUR` | `1` | 한국 시간 주간 배치 시작 시간대(0~23). 기본 01:00~02:00 사이 하루 한 번 시작 |

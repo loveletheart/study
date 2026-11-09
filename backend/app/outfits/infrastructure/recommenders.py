@@ -15,6 +15,7 @@ from app.outfits.application.dto import GeneratedOutfits, RecommendationEngine
 from app.outfits.application.exceptions import (
     OutfitLlmNotConfiguredError,
     OutfitLlmResponseError,
+    OutfitLlmTimeoutError,
     OutfitCloudNotConfiguredError,
     OutfitCloudResponseError,
 )
@@ -34,7 +35,6 @@ from app.outfits.infrastructure.prompts import (
     PERSONALIZATION_INSTRUCTION,
     _personal_requirements,
 )
-from app.outfits.infrastructure.clients import OllamaClient, GeminiClient
 from app.outfits.application.ports import OutfitRecommender
 from app.outfits.domain.quality import check_day
 
@@ -58,7 +58,7 @@ class StructuredOutfitRecommender:
         self, client: StructuredChatClient, model: str, provider: str,
         response_error: type[AppError] = OutfitLlmResponseError,
         configuration_error: type[AppError] = OutfitLlmNotConfiguredError,
-        *, repair_attempts: int = 0,
+        *, repair_attempts: int = 0, retry_on_timeout: bool = False,
     ) -> None:
         """추론 클라이언트와 제공사별 오류 설정"""
         if not model.strip():
@@ -68,22 +68,38 @@ class StructuredOutfitRecommender:
         self._provider = provider
         self._response_error = response_error
         self._repair_attempts = min(max(repair_attempts, 0), 1)
+        self._retry_on_timeout = retry_on_timeout
 
-    def _generate(self, days, schema):
+    def _generate(self, days: tuple[OutfitWeather, ...], schema: dict) -> GeneratedResponse:
+        """검증 실패와 허용된 시간 초과가 같은 재시도 횟수를 사용한다."""
         messages = build_messages(days, schema)
         for attempt in range(self._repair_attempts + 1):
-            content = self._client.chat(self._model, messages, schema)
+            last_attempt = attempt == self._repair_attempts
+            try:
+                content = self._client.chat(self._model, messages, schema)
+            except OutfitLlmTimeoutError:
+                if last_attempt or not self._retry_on_timeout:
+                    raise
+                continue
             try:
                 generated = GeneratedResponse.model_validate_json(content, strict=True)
                 if tuple(day.date for day in generated.days) != tuple(day.date for day in days):
                     raise ValueError('요청한 날짜와 순서를 지켜 주세요.')
-                errors = [issue for result, weather in zip(generated.days, days)
-                          for issue in check_day(result.model_dump(mode='json'), asdict(weather))['errors']]
+                errors = []
+                for result, weather in zip(generated.days, days):
+                    best, worst = result.best, result.worst
+                    if (
+                        best.model_dump(exclude={"accessories"}) == worst.model_dump(exclude={"accessories"})
+                        and set(best.accessories) == set(worst.accessories)
+                    ):
+                        errors.append("베스트와 워스트는 서로 다른 옷차림으로 작성해 주세요.")
+                    quality = check_day(result.model_dump(mode='json'), asdict(weather))
+                    errors.extend(issue['message'] for issue in quality['errors'])
                 if errors:
-                    raise ValueError(' '.join(dict.fromkeys(issue['message'] for issue in errors)))
+                    raise ValueError(' '.join(dict.fromkeys(errors)))
                 return generated
             except (ValidationError, ValueError) as error:
-                if attempt == self._repair_attempts:
+                if last_attempt:
                     raise self._response_error() from error
                 payload = json.loads(messages[1]['content'])
                 payload['answer_checks'] = [
@@ -91,6 +107,7 @@ class StructuredOutfitRecommender:
                     '위 문제를 수정한 최종 추천만 JSON으로 반환하세요. 검사 지시문 자체를 추천 이유에 쓰지 마세요.',
                 ]
                 messages[1] = {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False, allow_nan=False)}
+        raise self._response_error()
 
     def recommend(self, days: tuple[OutfitWeather, ...]) -> GeneratedOutfits:
         """날씨를 한 번에 전달하고 생성 결과의 날짜·내용 검증"""
@@ -100,15 +117,11 @@ class StructuredOutfitRecommender:
         schema["properties"]["days"].update(minItems=len(days), maxItems=len(days))
         schema["$defs"]["GeneratedDay"]["properties"]["date"]["enum"] = [day.date.isoformat() for day in days]
         generated = self._generate(days, schema)
+
         recommendations = []
+
         for weather, day in zip(days, generated.days):
             best, worst = _look(day.best), _look(day.worst)
-            if (
-                (best.outfit_type, best.top, best.bottom, best.one_piece, best.outerwear, best.shoes)
-                == (worst.outfit_type, worst.top, worst.bottom, worst.one_piece, worst.outerwear, worst.shoes)
-                and set(best.accessories) == set(worst.accessories)
-            ):
-                raise self._response_error()
             basis, reference = temperature_reference(weather)
             reasons = list(day.reasons)
             precautions = list(day.precautions)
@@ -130,13 +143,18 @@ class StructuredOutfitRecommender:
 
 
 class OllamaOutfitRecommender(StructuredOutfitRecommender):
-    def __init__(self, client: OllamaClient, model: str, *, repair_attempts: int = 0) -> None:
+    def __init__(
+        self, client: StructuredChatClient, model: str,
+        *, repair_attempts: int = 0, retry_on_timeout: bool = False,
+    ) -> None:
         """Ollama 응답에 공통 추천 검증 적용"""
-        super().__init__(client, model, "ollama", repair_attempts=repair_attempts)
+        super().__init__(
+            client, model, "ollama", repair_attempts=repair_attempts, retry_on_timeout=retry_on_timeout,
+        )
 
 
 class GeminiOutfitRecommender(StructuredOutfitRecommender):
-    def __init__(self, client: GeminiClient, model: str) -> None:
+    def __init__(self, client: StructuredChatClient, model: str) -> None:
         """Gemini 응답에 공통 옷차림 검증과 클라우드 오류 처리를 적용한다."""
         super().__init__(client, model, "gemini", OutfitCloudResponseError, OutfitCloudNotConfiguredError)
 

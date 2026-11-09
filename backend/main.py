@@ -33,7 +33,6 @@ from app.common.errors.handlers import register_exception_handlers
 from app.common.errors.openapi import error_code_table, error_responses
 from app.common.responses import ApiResponse
 from app.outfits.presentation.router import router as outfits_router
-from app.outfits.presentation.feedback_router import router as outfit_feedback_router
 from app.outfits.bootstrap import (
     get_cached_outfit_service,
     get_personalized_outfit_cache,
@@ -86,7 +85,6 @@ register_exception_handlers(app)
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
 app.include_router(outfits_router, prefix="/api/v1")
-app.include_router(outfit_feedback_router, prefix="/api/v1")
 
 # 프론트엔드를 빌드해 두면 같은 서버의 /app/에서 화면과 API를 함께 제공한다.
 # 개발 서버를 사용할 때나 빌드 전에는 기존 API만 그대로 실행한다.

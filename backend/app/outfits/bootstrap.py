@@ -46,9 +46,10 @@ def _cache_scope(settings: Settings, version: str) -> str:
 def _local_timeout(settings: Settings) -> float:
     """공통·개인 추천에 같은 로컬 대기 제한을 적용한다."""
     timeout = settings.llm_timeout_seconds
-    if settings.cloud_fallback_enabled and settings.fallback_local_timeout_seconds is not None:
-        timeout = min(timeout, settings.fallback_local_timeout_seconds)
-    return timeout
+    if not settings.cloud_fallback_enabled:
+        return timeout
+    fallback_timeout = settings.fallback_local_timeout_seconds
+    return min(timeout, fallback_timeout if fallback_timeout is not None else 20.0)
 
 
 def _local_recommender(
@@ -61,18 +62,26 @@ def _local_recommender(
         thinking=settings.llm_thinking,
         **_sampling_options(settings),
     )
+    recorded = RecordingChatClient(client, feedback_store_for_path(settings.database_path), "ollama")
     if preferences is None:
-        return OllamaOutfitRecommender(client, settings.llm_model)
-    return StructuredOutfitRecommender(PersonalizationChatClient(client, preferences), settings.llm_model, "ollama")
+        return OllamaOutfitRecommender(
+            recorded, settings.llm_model, repair_attempts=1,
+            retry_on_timeout=settings.cloud_fallback_enabled,
+        )
+    return StructuredOutfitRecommender(
+        PersonalizationChatClient(recorded, preferences), settings.llm_model, "ollama", repair_attempts=1,
+        retry_on_timeout=settings.cloud_fallback_enabled,
+    )
 
 
 def _cloud_recommender(settings: Settings, preferences: OutfitPreferences | None = None) -> OutfitRecommender:
     """클라우드 전환 시에만 Gemini 설정을 확인하고 추천 구현을 생성한다."""
     client = GeminiClient(settings.gemini_api_key, settings.gemini_timeout_seconds, settings.gemini_max_output_tokens)
+    recorded = RecordingChatClient(client, feedback_store_for_path(settings.database_path), "gemini")
     if preferences is None:
-        return GeminiOutfitRecommender(client, settings.gemini_model)
+        return GeminiOutfitRecommender(recorded, settings.gemini_model)
     return StructuredOutfitRecommender(
-        PersonalizationChatClient(client, preferences), settings.gemini_model, "gemini",
+        PersonalizationChatClient(recorded, preferences), settings.gemini_model, "gemini",
         OutfitCloudResponseError, OutfitCloudNotConfiguredError,
     )
 
