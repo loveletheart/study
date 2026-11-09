@@ -23,6 +23,10 @@ class ErrorCode(str, Enum):
     USER_INVALID_DATA = "USER_INVALID_DATA"
     USER_DUPLICATE_EMAIL = "USER_DUPLICATE_EMAIL"
     USER_NOT_FOUND = "USER_NOT_FOUND"
+    AUTH_REQUIRED = "AUTH_REQUIRED"
+    AUTH_INVALID_CREDENTIALS = "AUTH_INVALID_CREDENTIALS"
+    AUTH_FORBIDDEN = "AUTH_FORBIDDEN"
+    AUTH_RATE_LIMITED = "AUTH_RATE_LIMITED"
     WEATHER_INVALID_QUERY = "WEATHER_INVALID_QUERY"
     WEATHER_REGION_NOT_CONFIGURED = "WEATHER_REGION_NOT_CONFIGURED"
     WEATHER_UNAVAILABLE = "WEATHER_UNAVAILABLE"
@@ -42,6 +46,9 @@ class ErrorCode(str, Enum):
     OUTFIT_CLOUD_RATE_LIMITED = "OUTFIT_CLOUD_RATE_LIMITED"
     OUTFIT_CLOUD_TIMEOUT = "OUTFIT_CLOUD_TIMEOUT"
     OUTFIT_CLOUD_INVALID_RESPONSE = "OUTFIT_CLOUD_INVALID_RESPONSE"
+    OUTFIT_FEEDBACK_NOT_FOUND = "OUTFIT_FEEDBACK_NOT_FOUND"
+    OUTFIT_FEEDBACK_CONFLICT = "OUTFIT_FEEDBACK_CONFLICT"
+    OUTFIT_FEEDBACK_INVALID = "OUTFIT_FEEDBACK_INVALID"
 
 
 # 오류 명세 모델
@@ -57,6 +64,9 @@ class ErrorSpec:
 # 오류별 HTTP 상태와 기본 메시지: 위의 코드·명세 타입 정의 후 생성
 # 오류별 HTTP 상태와 기본 메시지: 위의 코드·명세 타입 정의 후 생성
 ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
+    ErrorCode.OUTFIT_FEEDBACK_NOT_FOUND: ErrorSpec(404, "수정안을 찾을 수 없습니다."),
+    ErrorCode.OUTFIT_FEEDBACK_CONFLICT: ErrorSpec(409, "다른 변경이 저장됐습니다. 최신 수정안을 다시 불러와 주세요."),
+    ErrorCode.OUTFIT_FEEDBACK_INVALID: ErrorSpec(422, "수정 내용과 검수 상태를 확인해 주세요."),
     # 400번대 오류는 클라이언트 문제이므로, 클라이언트에게 안내 메시지를 전달합니다.
     ErrorCode.COMMON_INVALID_REQUEST: ErrorSpec(422, "요청 입력값을 확인해 주세요."),
     ErrorCode.COMMON_NOT_FOUND: ErrorSpec(404, "요청한 API 경로를 찾을 수 없습니다."),
@@ -66,6 +76,10 @@ ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
     ErrorCode.USER_INVALID_DATA: ErrorSpec(422, "사용자 정보가 올바르지 않습니다."),
     ErrorCode.USER_DUPLICATE_EMAIL: ErrorSpec(409, "이미 등록된 이메일입니다."),
     ErrorCode.USER_NOT_FOUND: ErrorSpec(404, "사용자를 찾을 수 없습니다."),
+    ErrorCode.AUTH_REQUIRED: ErrorSpec(401, "로그인이 필요합니다. 다시 로그인해 주세요."),
+    ErrorCode.AUTH_INVALID_CREDENTIALS: ErrorSpec(401, "이메일 또는 비밀번호를 확인해 주세요."),
+    ErrorCode.AUTH_FORBIDDEN: ErrorSpec(403, "이 요청을 처리할 권한이 없습니다."),
+    ErrorCode.AUTH_RATE_LIMITED: ErrorSpec(429, "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요."),
     ErrorCode.WEATHER_INVALID_QUERY: ErrorSpec(422, "날씨 조회 조건을 확인해 주세요."),
     ErrorCode.WEATHER_REGION_NOT_CONFIGURED: ErrorSpec(503, "시군구 경계 조회를 위해 VWORLD_API_KEY를 로컬 설정에 입력해 주세요."),
     

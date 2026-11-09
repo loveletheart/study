@@ -37,6 +37,10 @@ class LocationsResponse(AttributeModel):
 
     locations: list[LocationResponse] = Field(description="검색 조건에 맞는 국내 지역 후보")
     attribution: str = Field(description="지역 데이터 출처. 화면에서 출처 표기에 사용")
+    total: int | None = Field(default=None, description="검색 조건에 맞는 전체 결과 수")
+    offset: int = Field(default=0, description="현재 페이지 시작 위치")
+    limit: int = Field(default=5, description="요청한 페이지 크기")
+    has_more: bool = Field(default=False, description="다음 페이지가 있는지 여부")
 
 
 class CurrentWeatherResponse(AttributeModel):

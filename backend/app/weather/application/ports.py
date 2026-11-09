@@ -5,6 +5,13 @@ from typing import Protocol
 
 # 프로젝트 모듈
 from app.weather.domain.models import Coordinates, Location, SigunguRegion, WeatherForecast
+from app.weather.application.dto import LocationSearchResult
+
+
+class LocationSearch(Protocol):
+    def search(self, query: str, limit: int, offset: int) -> LocationSearchResult:
+        """지역 이름·별칭·상위 지역의 부분 일치 검색과 페이지 정보."""
+        ...
 
 
 class WeatherProvider(Protocol):

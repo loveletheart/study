@@ -45,6 +45,7 @@ class Settings:
     outfit_weekly_max_age_seconds: float = 172800.0
     vworld_api_key: str = field(default="", repr=False)
     vworld_domain: str = ""
+    session_cookie_secure: bool = False
 
 
 # 설정값 검증
@@ -135,4 +136,5 @@ def get_settings() -> Settings:
         outfit_weekly_max_age_seconds=_number_setting(values, "STUDY_OUTFIT_WEEKLY_MAX_AGE_SECONDS", 172800, 86400, 604800),
         vworld_api_key=(values.get("VWORLD_API_KEY") or "").strip(),
         vworld_domain=(values.get("STUDY_VWORLD_DOMAIN") or "").strip(),
+        session_cookie_secure=_boolean_setting(values, "STUDY_SESSION_COOKIE_SECURE"),
     )

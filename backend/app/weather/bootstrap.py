@@ -7,7 +7,7 @@ from app.weather.application.services import WeatherService
 from app.weather.infrastructure.cache import TTLCache
 from app.weather.infrastructure.http_client import JsonHttpClient
 from app.weather.infrastructure.open_meteo import OpenMeteoProvider
-from app.weather.infrastructure.location_catalog import SQLiteLocationCatalog
+from app.weather.infrastructure.location_catalog import SQLiteLocationCatalog, SQLiteLocationSearch
 from app.weather.infrastructure.sigungu_resolver import VWorldSigunguResolver
 
 
@@ -23,7 +23,13 @@ def get_weather_provider() -> OpenMeteoProvider:
 
 def get_weather_service() -> WeatherService:
     """날씨 제공사와 서비스 연결"""
-    return WeatherService(get_weather_provider(), get_location_catalog())
+    return WeatherService(get_weather_provider(), get_location_catalog(), get_location_search())
+
+
+@lru_cache
+def get_location_search() -> SQLiteLocationSearch:
+    """검색 시 외부 호출 없이 국내 자료의 포함 검색과 페이지 조회를 사용한다."""
+    return SQLiteLocationSearch(get_settings().database_path)
 
 
 @lru_cache

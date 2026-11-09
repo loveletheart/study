@@ -1,0 +1,27 @@
+{
+  "name": "ondo-weather-wardrobe",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "format": "prettier --write src tests *.js *.json index.html README.md",
+    "test:e2e": "playwright test"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "dependencies": {
+    "vue": "3.5.45"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "@vitejs/plugin-vue": "6.0.10",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vue-tsc": "3.3.14"
+  }
+}

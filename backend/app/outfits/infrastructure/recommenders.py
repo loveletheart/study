@@ -36,6 +36,7 @@ from app.outfits.infrastructure.prompts import (
 )
 from app.outfits.infrastructure.clients import OllamaClient, GeminiClient
 from app.outfits.application.ports import OutfitRecommender
+from app.outfits.domain.quality import check_day
 
 
 def _look(value: GeneratedLook) -> OutfitLook:
@@ -57,6 +58,7 @@ class StructuredOutfitRecommender:
         self, client: StructuredChatClient, model: str, provider: str,
         response_error: type[AppError] = OutfitLlmResponseError,
         configuration_error: type[AppError] = OutfitLlmNotConfiguredError,
+        *, repair_attempts: int = 0,
     ) -> None:
         """추론 클라이언트와 제공사별 오류 설정"""
         if not model.strip():
@@ -65,6 +67,30 @@ class StructuredOutfitRecommender:
         self._model = model.strip()
         self._provider = provider
         self._response_error = response_error
+        self._repair_attempts = min(max(repair_attempts, 0), 1)
+
+    def _generate(self, days, schema):
+        messages = build_messages(days, schema)
+        for attempt in range(self._repair_attempts + 1):
+            content = self._client.chat(self._model, messages, schema)
+            try:
+                generated = GeneratedResponse.model_validate_json(content, strict=True)
+                if tuple(day.date for day in generated.days) != tuple(day.date for day in days):
+                    raise ValueError('요청한 날짜와 순서를 지켜 주세요.')
+                errors = [issue for result, weather in zip(generated.days, days)
+                          for issue in check_day(result.model_dump(mode='json'), asdict(weather))['errors']]
+                if errors:
+                    raise ValueError(' '.join(dict.fromkeys(issue['message'] for issue in errors)))
+                return generated
+            except (ValidationError, ValueError) as error:
+                if attempt == self._repair_attempts:
+                    raise self._response_error() from error
+                payload = json.loads(messages[1]['content'])
+                payload['answer_checks'] = [
+                    '출력 스키마의 의류 구성과 필드·개수 제한을 확인해 주세요.' if isinstance(error, ValidationError) else str(error)[:500],
+                    '위 문제를 수정한 최종 추천만 JSON으로 반환하세요. 검사 지시문 자체를 추천 이유에 쓰지 마세요.',
+                ]
+                messages[1] = {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False, allow_nan=False)}
 
     def recommend(self, days: tuple[OutfitWeather, ...]) -> GeneratedOutfits:
         """날씨를 한 번에 전달하고 생성 결과의 날짜·내용 검증"""
@@ -73,13 +99,7 @@ class StructuredOutfitRecommender:
         schema = GeneratedResponse.model_json_schema()
         schema["properties"]["days"].update(minItems=len(days), maxItems=len(days))
         schema["$defs"]["GeneratedDay"]["properties"]["date"]["enum"] = [day.date.isoformat() for day in days]
-        content = self._client.chat(self._model, build_messages(days, schema), schema)
-        try:
-            generated = GeneratedResponse.model_validate_json(content, strict=True)
-        except ValidationError as exc:
-            raise self._response_error() from exc
-        if tuple(day.date for day in generated.days) != tuple(day.date for day in days):
-            raise self._response_error()
+        generated = self._generate(days, schema)
         recommendations = []
         for weather, day in zip(days, generated.days):
             best, worst = _look(day.best), _look(day.worst)
@@ -103,15 +123,16 @@ class StructuredOutfitRecommender:
                 best=best, worst=worst, reasons=tuple(dict.fromkeys(reasons)),
                 avoid_reasons=tuple(dict.fromkeys(day.avoid_reasons)), precautions=tuple(dict.fromkeys(precautions)),
             ))
+        generation_id = getattr(self._client, 'last_generation_id', None)
         return GeneratedOutfits(
-            tuple(recommendations), RecommendationEngine(self._provider, self._model, PROMPT_VERSION),
+            tuple(recommendations), RecommendationEngine(self._provider, self._model, PROMPT_VERSION, generation_id=generation_id if isinstance(generation_id, str) else None),
         )
 
 
 class OllamaOutfitRecommender(StructuredOutfitRecommender):
-    def __init__(self, client: OllamaClient, model: str) -> None:
+    def __init__(self, client: OllamaClient, model: str, *, repair_attempts: int = 0) -> None:
         """Ollama 응답에 공통 추천 검증 적용"""
-        super().__init__(client, model, "ollama")
+        super().__init__(client, model, "ollama", repair_attempts=repair_attempts)
 
 
 class GeminiOutfitRecommender(StructuredOutfitRecommender):
@@ -121,6 +142,10 @@ class GeminiOutfitRecommender(StructuredOutfitRecommender):
 
 
 class PersonalizationChatClient:
+    @property
+    def last_generation_id(self):
+        return getattr(self._client, 'last_generation_id', None)
+
     def __init__(self, client: StructuredChatClient, preferences: OutfitPreferences) -> None:
         """날씨 검증용 클라이언트에 개인화 문맥을 추가한다."""
         self._client = client

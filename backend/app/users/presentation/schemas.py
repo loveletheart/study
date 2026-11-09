@@ -2,9 +2,13 @@
 
 # 표준 라이브러리
 from uuid import UUID
+from typing import Annotated
 
 # 외부 라이브러리
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, StringConstraints
+from app.outfits.domain.models import Activity, AvoidItem, ClothingPreference, ColdSensitivity, OutfitPreferences, OutfitStyle
+from app.users.application.dto import AccountDTO, RecommendationProfile
+from app.weather.presentation.schemas import LocationResponse
 
 
 class CreateUserRequest(BaseModel):
@@ -24,3 +28,54 @@ class UserResponse(BaseModel):
     id: UUID = Field(description="서버가 생성한 사용자 UUID")
     name: str = Field(description="앞뒤 공백을 제거한 사용자 이름")
     email: str = Field(description="소문자로 정규화한 이메일")
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=1, max_length=254)
+    password: SecretStr = Field(min_length=1, max_length=128)
+
+
+class RegisterRequest(LoginRequest):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+    password: SecretStr = Field(min_length=10, max_length=128, description="10~128자. 앞뒤 공백도 비밀번호에 포함")
+
+
+class PreferencesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cold_sensitivity: ColdSensitivity = ColdSensitivity.NORMAL
+    style: OutfitStyle = OutfitStyle.DEFAULT
+    activity: Activity = Activity.DAILY
+    clothing_preference: ClothingPreference = ClothingPreference.ANY
+    avoid_items: list[AvoidItem] = Field(default_factory=list, max_length=6)
+
+    def to_domain(self) -> OutfitPreferences:
+        return OutfitPreferences(self.cold_sensitivity, self.style, self.activity, self.clothing_preference, tuple(self.avoid_items))
+
+
+class ProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+    location_id: int | None = Field(default=None, gt=0, strict=True, description="지역 검색에서 선택한 식별자")
+    preferences: PreferencesRequest
+
+    def to_domain(self) -> RecommendationProfile:
+        return RecommendationProfile(self.location_id, self.preferences.to_domain())
+
+
+class ProfileResponse(BaseModel):
+    location: LocationResponse | None
+    preferences: PreferencesRequest
+
+
+class AccountResponse(BaseModel):
+    user: UserResponse
+    profile: ProfileResponse
+
+    @classmethod
+    def from_account(cls, account: AccountDTO) -> "AccountResponse":
+        from dataclasses import asdict
+        return cls(user=UserResponse.model_validate(account.user), profile=ProfileResponse(
+            location=LocationResponse.model_validate(account.location) if account.location else None,
+            preferences=PreferencesRequest.model_validate(asdict(account.preferences)),
+        ))

@@ -13,7 +13,7 @@ from app.outfits.application.dto import (
     WeeklyOutfitResult,
     RegionOutfitResult,
 )
-from app.outfits.domain.models import OutfitType, TemperatureBasis, Activity, ColdSensitivity, OutfitStyle
+from app.outfits.domain.models import OutfitType, TemperatureBasis, Activity, ColdSensitivity, OutfitStyle, ClothingPreference, AvoidItem
 from app.weather.presentation.schemas import LocationResponse
 
 
@@ -75,6 +75,7 @@ class WeeklyWardrobeResponse(AttributeResponse):
 
 
 class RecommendationEngineResponse(AttributeResponse):
+    generation_id: str | None = Field(default=None, description="서버에 보존한 실제 추천 원본의 식별자")
     provider: str = Field(description="옷차림 생성 제공사. ollama 또는 gemini")
     model: str = Field(description="추천에 실제 사용한 모델명")
     prompt_version: str = Field(description="추천 프롬프트 버전")
@@ -133,6 +134,8 @@ class WeeklyOutfitResponse(OutfitMetadataResponse):
 
 
 class PersonalizationResponse(BaseModel):
+    clothing_preference: ClothingPreference = Field(default=ClothingPreference.ANY, description="선호 의류 유형")
+    avoid_items: list[AvoidItem] = Field(default_factory=list, description="피하고 싶은 의류")
     cold_sensitivity: ColdSensitivity = Field(description="체감 추위: 보통·추위를 많이 탐·더위를 많이 탐")
     style: OutfitStyle = Field(description="기본·편안한 스타일·단정한 스타일")
     activity: Activity = Field(description="일상·야외·활동량이 많음")
@@ -163,6 +166,7 @@ def _personal_metadata(result: RegionOutfitResult[TodayOutfitResult] | RegionOut
         "personalization": PersonalizationResponse(
             cold_sensitivity=result.preferences.cold_sensitivity,
             style=result.preferences.style, activity=result.preferences.activity,
+            clothing_preference=result.preferences.clothing_preference, avoid_items=list(result.preferences.avoid_items),
             adjustments=list(result.adjustments),
             llm_used=result.personalization is not None, cache_hit=result.personalization_cache_hit,
             generated_at=result.personalization.generated_at if result.personalization else None,
