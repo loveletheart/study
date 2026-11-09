@@ -36,16 +36,17 @@ Longitude = Annotated[float, Query(ge=-180, le=180, allow_inf_nan=False, descrip
 @router.get(
     "/locations", response_model=ApiResponse[LocationsResponse],
     summary="국내 지역 검색", operation_id="search_weather_locations",
-    description="국내 지역을 검색하고 선택에 필요한 위도·경도를 반환합니다.",
+    description="국내 지역 목록에서 이름·별칭·상위 지역에 검색어가 포함된 후보를 찾습니다. 공백으로 나눈 단어는 모두 포함해야 하며 offset으로 다음 결과를 조회합니다.",
     response_description="지역 후보 목록과 날씨 조회에 사용할 위도·경도",
 )
 def search_locations(
     query: Annotated[str, Query(min_length=2, max_length=100, description="2~100자의 국내 지역명", examples=["서울"])],
     service: WeatherServiceDependency,
-    limit: Annotated[int, Query(ge=1, le=10, description="검색 결과 최대 개수(1~10)")] = 5,
+    limit: Annotated[int, Query(ge=1, le=50, description="한 페이지 개수(1~50)")] = 5,
+    offset: Annotated[int, Query(ge=0, le=1000000, description="건너뛸 결과 수. 다음 페이지 조회에 사용")] = 0,
 ) -> ApiResponse[LocationsResponse]:
     """국내 지역명으로 위치 후보 검색"""
-    result = service.search_locations(query, limit)
+    result = service.search_locations(query, limit, offset)
     return ApiResponse(data=LocationsResponse.model_validate(result))
 
 

@@ -6,13 +6,13 @@ import json
 from dataclasses import asdict
 
 # 프로젝트 모듈
-from app.outfits.domain.models import OutfitWeather, Activity, ColdSensitivity, OutfitPreferences, OutfitStyle
+from app.outfits.domain.models import OutfitWeather, Activity, ColdSensitivity, OutfitPreferences, OutfitStyle, ClothingPreference, AvoidItem
 from app.outfits.domain.rules import temperature_reference
 
 
 # 프롬프트 버전
 PROMPT_VERSION = "2.2"
-PERSONALIZATION_VERSION = "2.4"
+PERSONALIZATION_VERSION = "2.5"
 
 
 # 기본 추천 프롬프트
@@ -73,7 +73,7 @@ def build_messages(days: tuple[OutfitWeather, ...], schema: dict) -> list[dict[s
 
 def _personal_requirements(preferences: OutfitPreferences) -> dict[str, str]:
     """선택값의 의미를 모델에 설명하며 사용자에게 보여줄 추천 문장은 만들지 않는다."""
-    return {
+    requirements = {
         "체온_성향": {
             ColdSensitivity.NORMAL: "추위와 더위에 대한 민감도는 보통입니다. 하루의 기온 범위에 맞춰 조절하세요.",
             ColdSensitivity.COLD: "추위를 많이 탑니다. 추운 시간과 야외 활동의 보온·방풍, 노출 감소를 우선 고려하세요.",
@@ -90,3 +90,12 @@ def _personal_requirements(preferences: OutfitPreferences) -> dict[str, str]:
             Activity.ACTIVE: "몸을 활발히 움직이는 활동을 할 예정입니다. 신축성·흡습·통풍과 활동 전후 체온 조절을 고려하세요.",
         }[preferences.activity],
     }
+    if preferences.clothing_preference != ClothingPreference.ANY:
+        requirements["선호_의류"] = {
+            ClothingPreference.MENSWEAR: "남성복 위주의 의류와 실루엣을 선호합니다. 성별 정체성이나 신체 치수는 추정하지 마세요.",
+            ClothingPreference.WOMENSWEAR: "여성복 위주의 의류와 실루엣을 선호합니다. 원피스나 치마를 반드시 선택할 필요는 없으며 신체 치수는 추정하지 마세요.",
+        }[preferences.clothing_preference]
+    if preferences.avoid_items:
+        names = {AvoidItem.SKIRTS: "치마", AvoidItem.DRESSES: "원피스", AvoidItem.SHORTS: "반바지", AvoidItem.SANDALS: "샌들", AvoidItem.HEELS: "굽 높은 신발", AvoidItem.SLEEVELESS: "민소매"}
+        requirements["피할_의류"] = "베스트 추천에서 다음 항목을 제외하세요: " + ", ".join(names[item] for item in preferences.avoid_items) + ". 날씨에 맞는 대안을 선택하고 피하는 이유나 개인 사정을 지어내지 마세요."
+    return requirements

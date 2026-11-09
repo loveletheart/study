@@ -140,8 +140,29 @@ class Activity(str, Enum):
     ACTIVE = "active"
 
 
+class ClothingPreference(str, Enum):
+    ANY = "any"
+    MENSWEAR = "menswear"
+    WOMENSWEAR = "womenswear"
+
+
+class AvoidItem(str, Enum):
+    SKIRTS = "skirts"
+    DRESSES = "dresses"
+    SHORTS = "shorts"
+    SANDALS = "sandals"
+    HEELS = "heels"
+    SLEEVELESS = "sleeveless"
+
+
 @dataclass(frozen=True)
 class OutfitPreferences:
     cold_sensitivity: ColdSensitivity = ColdSensitivity.NORMAL
     style: OutfitStyle = OutfitStyle.DEFAULT
     activity: Activity = Activity.DAILY
+    clothing_preference: ClothingPreference = ClothingPreference.ANY
+    avoid_items: tuple[AvoidItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        """선택 순서와 중복이 달라도 동일한 추천 조건으로 공유한다."""
+        object.__setattr__(self, "avoid_items", tuple(sorted({AvoidItem(item) for item in self.avoid_items}, key=lambda item: item.value)))

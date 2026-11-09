@@ -6,6 +6,8 @@ from uuid import UUID
 
 # 프로젝트 모듈
 from app.users.domain.entities import User
+from app.outfits.domain.models import OutfitPreferences
+from app.weather.domain.models import Location
 
 
 @dataclass(frozen=True)
@@ -24,3 +26,16 @@ class UserDTO:
     def from_entity(cls, user: User) -> "UserDTO":
         """사용자 객체를 응답 DTO로 변환"""
         return cls(id=user.id, name=user.name, email=user.email)
+
+
+@dataclass(frozen=True)
+class RecommendationProfile:
+    location_id: int | None = None
+    preferences: OutfitPreferences = OutfitPreferences()
+
+
+@dataclass(frozen=True)
+class AccountDTO:
+    user: UserDTO
+    location: Location | None
+    preferences: OutfitPreferences

@@ -295,7 +295,7 @@ class RegionTests(unittest.TestCase):
         self.assertEqual(request["output_schema"], self.personal_llm.chat.call_args.args[2])
         self.assertEqual(len(request["look_examples"]), 2)
         self.assertNotIn("shared_recommendations", request)
-        self.assertEqual(personal.personalization.generated.engine.prompt_version, "2.4")
+        self.assertEqual(personal.personalization.generated.engine.prompt_version, "2.5")
 
     def test_explicit_personal_conditions_have_distinct_meanings_without_changing_weather(self):
         """각 선택값의 의미를 명시하면서 원본 날씨와 출력 계약을 유지한다."""
@@ -415,6 +415,23 @@ class RegionTests(unittest.TestCase):
         self.fixture.now += timedelta(hours=24)
         self.personal_cache.refresh_due()
         self.personal_llm.chat.assert_called_once()
+
+
+    def test_http_preserves_selected_clothing_and_avoid_preferences_in_model_input(self):
+        previous = app.dependency_overrides.copy()
+        self.addCleanup(lambda: (app.dependency_overrides.clear(), app.dependency_overrides.update(previous)))
+        app.dependency_overrides[get_region_outfit_service] = lambda: self.service
+        client = TestClient(app)
+        self.addCleanup(client.close)
+        response = client.get('/api/v1/outfits/regions/1001/today', params=[
+            ('clothing_preference', 'menswear'), ('avoid_items', 'sandals'), ('avoid_items', 'shorts'),
+        ])
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = json.loads(self.personal_llm.chat.call_args.args[1][1]['content'])
+        self.assertEqual(payload['preferences']['clothing_preference'], 'menswear')
+        self.assertEqual(set(payload['preferences']['avoid_items']), {'sandals', 'shorts'})
+        self.assertIn('선호_의류', payload['personal_requirements'])
+        self.assertIn('피할_의류', payload['personal_requirements'])
 
 
 class SharedCapacitySettingsTests(unittest.TestCase):

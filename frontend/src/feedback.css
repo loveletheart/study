@@ -1,0 +1,131 @@
+/* Feedback-only styles: all selectors are restricted to this feature. */
+.feedback-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: 90dvh;
+  overflow-y: auto;
+}
+.feedback-review {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: clamp(16px, 4vw, 48px);
+}
+.feedback-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+.feedback-actions h1,
+.feedback-actions h2 {
+  flex: 1;
+}
+.feedback-form {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.feedback-field {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+.feedback-field input,
+.feedback-field textarea,
+.feedback-field select,
+.feedback-review select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc8bd;
+  border-radius: 8px;
+  background: #fff;
+  color: #292f28;
+  font: inherit;
+  box-sizing: border-box;
+}
+.feedback-field textarea {
+  resize: vertical;
+}
+.feedback-issues,
+.feedback-look {
+  border: 1px solid #ccc8bd;
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 0;
+  min-width: 0;
+}
+.feedback-issues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.feedback-issues label,
+.feedback-confirm {
+  display: flex;
+  align-items: start;
+  gap: 8px;
+}
+.feedback-confirm {
+  margin: 24px 0 12px;
+}
+.feedback-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.feedback-list button {
+  width: 100%;
+  justify-content: start;
+  text-align: left;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.feedback-detail {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid #ccc8bd;
+}
+.feedback-weather dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #ccc8bd;
+  border-radius: 12px;
+}
+.feedback-weather dt {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.feedback-weather dd {
+  margin: 0;
+  font-weight: 600;
+}
+.feedback-review pre {
+  max-width: 100%;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  background: #f3f2ed;
+}
+.feedback-review details {
+  margin: 20px 0;
+}
+.feedback-review summary {
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.feedback-entry {
+  margin: 16px 0;
+}
+.feedback-entry p {
+  font-size: 13px;
+}
+.feedback-review button:disabled,
+.feedback-dialog button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

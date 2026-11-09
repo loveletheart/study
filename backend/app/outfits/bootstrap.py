@@ -22,6 +22,8 @@ from app.outfits.infrastructure.prompts import PERSONALIZATION_VERSION, PROMPT_V
 from app.outfits.infrastructure.cache import CachedOutfitService, SQLitePersonalizedOutfitCache
 from app.outfits.infrastructure.jobs import WeeklyOutfitBatch
 from app.outfits.domain.models import OutfitPreferences
+from app.outfits.feedback_bootstrap import feedback_store_for_path
+from app.outfits.infrastructure.feedback import RecordingChatClient
 from app.weather.bootstrap import get_location_catalog, get_sigungu_resolver, get_weather_service
 
 

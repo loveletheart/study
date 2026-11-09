@@ -1,0 +1,10 @@
+{
+  "source_url": "https://download.geonames.org/export/dump/KR.zip",
+  "source_sha256": "4d2318fc2392d0a38c44fa403d312c8f16d6c887643fcb9e313ea14104e46ec0",
+  "bundle_sha256": "d146b42459ea3168026a546a365f87e28ff0e67e9eb12165388201346e79a17a",
+  "generated_at": "2026-11-07T07:22:42.593224+00:00",
+  "records": 68091,
+  "license": "CC BY 4.0",
+  "attribution": "GeoNames · https://www.geonames.org/",
+  "format_version": 1
+}
