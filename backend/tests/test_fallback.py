@@ -243,7 +243,7 @@ class FallbackTests(unittest.TestCase):
         content = outfit_fixtures.generated_content([days[0].date.isoformat()])
         base = self.fixture.recommender.recommend(days)
         for preferences in (None, OutfitPreferences(style=OutfitStyle.FORMAL)):
-            for failure in ("schema", "date", "quality", "timeout"):
+            for failure in ("schema", "date", "quality", "duplicate", "timeout"):
                 invalid = json.loads(content)
                 if failure == "schema":
                     del invalid["days"][0]["best"]["shoes"]
@@ -251,6 +251,11 @@ class FallbackTests(unittest.TestCase):
                     invalid["days"][0]["date"] = "2000-01-01"
                 elif failure == "quality":
                     invalid["days"][0]["best"]["shoes"] = "장갑"
+                elif failure == "duplicate":
+                    best = invalid["days"][0]["best"]
+                    invalid["days"][0]["worst"] = {
+                        **best, "accessories": best["accessories"] * 2,
+                    }
                 first_attempt = (
                     TimeoutError() if failure == "timeout"
                     else http_response(chat_envelope(json.dumps(invalid, ensure_ascii=False)))
@@ -281,6 +286,8 @@ class FallbackTests(unittest.TestCase):
                         self.assertEqual(first, second)
                     else:
                         self.assertIn("answer_checks", corrected_request)
+                    if failure == "duplicate":
+                        self.assertIn("서로 다른 옷차림", corrected_request["answer_checks"][0])
                     if preferences is not None:
                         self.assertEqual(corrected_request["preferences"]["style"], "formal")
                     store = feedback_store_for_path(path)

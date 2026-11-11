@@ -85,10 +85,18 @@ class StructuredOutfitRecommender:
                 generated = GeneratedResponse.model_validate_json(content, strict=True)
                 if tuple(day.date for day in generated.days) != tuple(day.date for day in days):
                     raise ValueError('요청한 날짜와 순서를 지켜 주세요.')
-                errors = [issue for result, weather in zip(generated.days, days)
-                          for issue in check_day(result.model_dump(mode='json'), asdict(weather))['errors']]
+                errors = []
+                for result, weather in zip(generated.days, days):
+                    best, worst = result.best, result.worst
+                    if (
+                        best.model_dump(exclude={"accessories"}) == worst.model_dump(exclude={"accessories"})
+                        and set(best.accessories) == set(worst.accessories)
+                    ):
+                        errors.append("베스트와 워스트는 서로 다른 옷차림으로 작성해 주세요.")
+                    quality = check_day(result.model_dump(mode='json'), asdict(weather))
+                    errors.extend(issue['message'] for issue in quality['errors'])
                 if errors:
-                    raise ValueError(' '.join(dict.fromkeys(issue['message'] for issue in errors)))
+                    raise ValueError(' '.join(dict.fromkeys(errors)))
                 return generated
             except (ValidationError, ValueError) as error:
                 if last_attempt:
@@ -109,22 +117,11 @@ class StructuredOutfitRecommender:
         schema["properties"]["days"].update(minItems=len(days), maxItems=len(days))
         schema["$defs"]["GeneratedDay"]["properties"]["date"]["enum"] = [day.date.isoformat() for day in days]
         generated = self._generate(days, schema)
-        if (
-            generated is None or not hasattr(generated, 'days')
-            or generated.days is None or not generated.days
-        ):
-            raise self._response_error()
 
         recommendations = []
 
         for weather, day in zip(days, generated.days):
             best, worst = _look(day.best), _look(day.worst)
-            if (
-                (best.outfit_type, best.top, best.bottom, best.one_piece, best.outerwear, best.shoes)
-                == (worst.outfit_type, worst.top, worst.bottom, worst.one_piece, worst.outerwear, worst.shoes)
-                and set(best.accessories) == set(worst.accessories)
-            ):
-                raise self._response_error()
             basis, reference = temperature_reference(weather)
             reasons = list(day.reasons)
             precautions = list(day.precautions)
