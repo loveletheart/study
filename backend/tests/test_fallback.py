@@ -164,7 +164,7 @@ class FallbackTests(unittest.TestCase):
         weather.return_value = self.fixture.weather_service
         for enabled, normal_timeout, fallback_timeout, expected_timeout in [
             (False, 180, None, 180), (False, 180, 15, 180),
-            (True, 180, None, 180), (True, 300, None, 300), (True, 3, None, 3),
+            (True, 180, None, 20), (True, 300, None, 20), (True, 3, None, 3),
             (True, 180, 15, 15), (True, 3, 15, 3), (True, 180, 300, 180),
         ]:
             with self.subTest(enabled=enabled, timeout=normal_timeout, fallback_timeout=fallback_timeout):
@@ -238,19 +238,23 @@ class FallbackTests(unittest.TestCase):
             self.assertEqual(result.engine.fallback_reason, "OUTFIT_LLM_UNAVAILABLE")
 
     def test_local_repair_preserves_both_attempts_and_final_generation_without_cloud(self):
-        """실제 조립 경로에서 공통·개인화의 검증 실패를 한 번 고치고 최종 생성 기록을 연결한다."""
+        """공통·개인화의 검증 실패나 시간 초과 후 로컬 재시도와 생성 기록을 검증한다."""
         days = self.forecast.days[:1]
         content = outfit_fixtures.generated_content([days[0].date.isoformat()])
         base = self.fixture.recommender.recommend(days)
         for preferences in (None, OutfitPreferences(style=OutfitStyle.FORMAL)):
-            for failure in ("schema", "date", "quality"):
+            for failure in ("schema", "date", "quality", "timeout"):
                 invalid = json.loads(content)
                 if failure == "schema":
                     del invalid["days"][0]["best"]["shoes"]
                 elif failure == "date":
                     invalid["days"][0]["date"] = "2000-01-01"
-                else:
+                elif failure == "quality":
                     invalid["days"][0]["best"]["shoes"] = "장갑"
+                first_attempt = (
+                    TimeoutError() if failure == "timeout"
+                    else http_response(chat_envelope(json.dumps(invalid, ensure_ascii=False)))
+                )
                 path = self.database_path.with_name(f"repair-{preferences is not None}-{failure}.db")
                 settings = Settings("test", path, llm_model="local-model", cloud_fallback_enabled=True)
                 with (
@@ -258,7 +262,7 @@ class FallbackTests(unittest.TestCase):
                     patch("app.outfits.bootstrap.get_settings", return_value=settings),
                     patch("app.outfits.bootstrap.get_weather_service", return_value=self.fixture.weather_service),
                     patch("app.outfits.infrastructure.clients.urlopen", side_effect=[
-                        http_response(chat_envelope(json.dumps(invalid, ensure_ascii=False))),
+                        first_attempt,
                         http_response(chat_envelope(content)),
                     ]) as local,
                     patch("app.outfits.infrastructure.clients.genai.Client") as cloud,
@@ -268,11 +272,15 @@ class FallbackTests(unittest.TestCase):
                         else LlmOutfitPersonalizer(_personal_recommender).personalize(base, preferences)
                     )
                     self.assertEqual(local.call_count, 2)
+                    self.assertEqual([call.kwargs["timeout"] for call in local.call_args_list], [20, 20])
                     cloud.assert_not_called()
                     first, second = [json.loads(call.args[0].data) for call in local.call_args_list]
                     self.assertNotIn("answer_checks", json.loads(first["messages"][1]["content"]))
                     corrected_request = json.loads(second["messages"][1]["content"])
-                    self.assertIn("answer_checks", corrected_request)
+                    if failure == "timeout":
+                        self.assertEqual(first, second)
+                    else:
+                        self.assertIn("answer_checks", corrected_request)
                     if preferences is not None:
                         self.assertEqual(corrected_request["preferences"]["style"], "formal")
                     store = feedback_store_for_path(path)
@@ -308,13 +316,20 @@ class FallbackTests(unittest.TestCase):
                     patch("app.outfits.infrastructure.clients.genai.Client") as sdk,
                 ):
                     cloud = sdk.return_value.__enter__.return_value.models.generate_content
-                    cloud.return_value = gemini_response(content)
+                    local_attempts = 2 if reason == "OUTFIT_LLM_TIMEOUT" else 1
+
+                    def generate_cloud(**kwargs):
+                        self.assertEqual(local.call_count, local_attempts)
+                        return gemini_response(content)
+
+                    cloud.side_effect = generate_cloud
                     with self.assertLogs("app.outfits.application.policies", level="WARNING"):
                         result = (
                             LlmOutfitPersonalizer(_personal_recommender).personalize(base, OutfitPreferences())
                             if personal else get_outfit_service().get_today(37, 127)
                         )
-                    local.assert_called_once()
+                    self.assertEqual(local.call_count, local_attempts)
+                    self.assertEqual([call.kwargs["timeout"] for call in local.call_args_list], [20] * local_attempts)
                     cloud.assert_called_once()
                     self.assertEqual(result.engine.provider, "gemini")
                     self.assertTrue(result.engine.fallback_used)
@@ -323,7 +338,7 @@ class FallbackTests(unittest.TestCase):
                     generation = store.generation(result.engine.generation_id)
                     self.assertEqual(generation["provider"], "gemini")
                     self.assertEqual(generation["raw_response"], content)
-                    self.assertEqual(len(store.generations()), 2)
+                    self.assertEqual(len(store.generations()), local_attempts + 1)
                     feedback = store.create(
                         str(uuid4()), result.engine.generation_id, days[0].date.isoformat(), ["other"],
                     )

@@ -46,9 +46,10 @@ def _cache_scope(settings: Settings, version: str) -> str:
 def _local_timeout(settings: Settings) -> float:
     """공통·개인 추천에 같은 로컬 대기 제한을 적용한다."""
     timeout = settings.llm_timeout_seconds
-    if settings.cloud_fallback_enabled and settings.fallback_local_timeout_seconds is not None:
-        timeout = min(timeout, settings.fallback_local_timeout_seconds)
-    return timeout
+    if not settings.cloud_fallback_enabled:
+        return timeout
+    fallback_timeout = settings.fallback_local_timeout_seconds
+    return min(timeout, fallback_timeout if fallback_timeout is not None else 20.0)
 
 
 def _local_recommender(
@@ -63,9 +64,13 @@ def _local_recommender(
     )
     recorded = RecordingChatClient(client, feedback_store_for_path(settings.database_path), "ollama")
     if preferences is None:
-        return OllamaOutfitRecommender(recorded, settings.llm_model, repair_attempts=1)
+        return OllamaOutfitRecommender(
+            recorded, settings.llm_model, repair_attempts=1,
+            retry_on_timeout=settings.cloud_fallback_enabled,
+        )
     return StructuredOutfitRecommender(
         PersonalizationChatClient(recorded, preferences), settings.llm_model, "ollama", repair_attempts=1,
+        retry_on_timeout=settings.cloud_fallback_enabled,
     )
 
 

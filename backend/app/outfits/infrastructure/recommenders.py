@@ -15,6 +15,7 @@ from app.outfits.application.dto import GeneratedOutfits, RecommendationEngine
 from app.outfits.application.exceptions import (
     OutfitLlmNotConfiguredError,
     OutfitLlmResponseError,
+    OutfitLlmTimeoutError,
     OutfitCloudNotConfiguredError,
     OutfitCloudResponseError,
 )
@@ -57,7 +58,7 @@ class StructuredOutfitRecommender:
         self, client: StructuredChatClient, model: str, provider: str,
         response_error: type[AppError] = OutfitLlmResponseError,
         configuration_error: type[AppError] = OutfitLlmNotConfiguredError,
-        *, repair_attempts: int = 0,
+        *, repair_attempts: int = 0, retry_on_timeout: bool = False,
     ) -> None:
         """추론 클라이언트와 제공사별 오류 설정"""
         if not model.strip():
@@ -67,12 +68,19 @@ class StructuredOutfitRecommender:
         self._provider = provider
         self._response_error = response_error
         self._repair_attempts = min(max(repair_attempts, 0), 1)
+        self._retry_on_timeout = retry_on_timeout
 
     def _generate(self, days: tuple[OutfitWeather, ...], schema: dict) -> GeneratedResponse:
-        """검증한 응답을 반환하고 허용한 수정 횟수를 넘으면 업무 예외를 발생시킨다."""
+        """검증 실패와 허용된 시간 초과가 같은 재시도 횟수를 사용한다."""
         messages = build_messages(days, schema)
         for attempt in range(self._repair_attempts + 1):
-            content = self._client.chat(self._model, messages, schema)
+            last_attempt = attempt == self._repair_attempts
+            try:
+                content = self._client.chat(self._model, messages, schema)
+            except OutfitLlmTimeoutError:
+                if last_attempt or not self._retry_on_timeout:
+                    raise
+                continue
             try:
                 generated = GeneratedResponse.model_validate_json(content, strict=True)
                 if tuple(day.date for day in generated.days) != tuple(day.date for day in days):
@@ -83,7 +91,7 @@ class StructuredOutfitRecommender:
                     raise ValueError(' '.join(dict.fromkeys(issue['message'] for issue in errors)))
                 return generated
             except (ValidationError, ValueError) as error:
-                if attempt == self._repair_attempts:
+                if last_attempt:
                     raise self._response_error() from error
                 payload = json.loads(messages[1]['content'])
                 payload['answer_checks'] = [
@@ -138,9 +146,14 @@ class StructuredOutfitRecommender:
 
 
 class OllamaOutfitRecommender(StructuredOutfitRecommender):
-    def __init__(self, client: StructuredChatClient, model: str, *, repair_attempts: int = 0) -> None:
+    def __init__(
+        self, client: StructuredChatClient, model: str,
+        *, repair_attempts: int = 0, retry_on_timeout: bool = False,
+    ) -> None:
         """Ollama 응답에 공통 추천 검증 적용"""
-        super().__init__(client, model, "ollama", repair_attempts=repair_attempts)
+        super().__init__(
+            client, model, "ollama", repair_attempts=repair_attempts, retry_on_timeout=retry_on_timeout,
+        )
 
 
 class GeminiOutfitRecommender(StructuredOutfitRecommender):
