@@ -8,8 +8,8 @@
 
 | 파일 | 역할 |
 | --- | --- |
-| `presentation/router.py` | 좌표·시군구 오늘/주간 API 4개와 개인 조건 입력, 공통 오류·태그 설정 |
-| `presentation/schemas.py` | 기본·지역·개인화 응답 모델과 직렬화 |
+| `presentation/router.py` | 좌표·시군구 오늘/주간 추천과 피드백 API |
+| `presentation/schemas.py` | 추천 응답과 피드백 요청 모델 |
 | `application/services.py` | 공통 생성 검증과 시군구 공통 추천·개인화 조합 서비스 |
 | `application/ports.py` | 날씨 조회·추천 생성·공통 캐시·개인화 캐시 계약 |
 | `application/policies.py` | 로컬 우선·허용된 오류에만 클라우드 한 번 호출하는 정책 |
@@ -28,7 +28,7 @@
 
 Domain은 FastAPI·Pydantic·DB·외부 LLM 클라이언트를 import하지 않습니다. Application은 업무 절차와 계약을 정의하고 지역 검색·시군구 판정에는 weather의 공개 계약과 위치 모델을 사용합니다. 외부 통신과 저장 구현의 연결은 `bootstrap.py`에서 관리합니다. 추론 서버를 바꾸려면 OutfitRecommender를 구현하고 bootstrap의 연결을 교체합니다. 현재 구현을 LM Studio/vLLM에 그대로 연결하는 호환 기능은 아직 없습니다.
 
-`main.py`는 `presentation/router.py` 하나만 등록합니다. 좌표·시군구 경로의 핸들러도 이 파일 안에 직접 정의합니다. 기존 `/api/v1/outfits/today`, `/weekly`, `/regions/{location_id}/today`, `/regions/{location_id}/weekly` 주소를 유지합니다. 개인 조건의 추천 처리는 이 모듈에서, 로그인과 프로필 저장은 사용자 모듈에서 담당합니다. 화면이 저장된 프로필 조건을 추천 API에 전달하며 계정 식별자를 추천 캐시 키에 넣지 않습니다.
+`main.py`는 `presentation/router.py` 하나를 등록합니다. 이 라우터가 `/api/v1/outfits` 아래의 추천 API와 `/api/v1/outfit-feedback` 아래의 피드백 API를 함께 처리합니다. 개인 조건의 추천 처리는 이 모듈에서, 로그인과 프로필 저장은 사용자 모듈에서 담당합니다. 화면이 저장된 프로필 조건을 추천 API에 전달하며 계정 식별자를 추천 캐시 키에 넣지 않습니다.
 
 계층 폴더는 유지하고 같은 역할은 한 파일로 합칩니다. 좌표·시군구, 공통·개인화, 로컬·클라우드처럼 기능이나 제공사가 달라도 동일 역할의 코드는 같은 파일에 둡니다. 하위 기능별 폴더와 단순 전달용 진입 파일을 추가하지 않습니다.
 
