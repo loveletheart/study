@@ -26,7 +26,6 @@ AUTH_TABLES = (
     "CREATE TABLE IF NOT EXISTS auth_rate_limits (bucket TEXT PRIMARY KEY, window_start REAL NOT NULL, attempts INTEGER NOT NULL)",
 )
 
-# 검증 테스트
 def user_from_row(row: sqlite3.Row) -> User:
     """DB 조회 행을 사용자 객체로 변환"""
     return User(id=UUID(row["id"]), name=row["name"], email=row["email"])

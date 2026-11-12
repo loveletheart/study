@@ -8,8 +8,8 @@
 
 | 파일 | 역할 |
 | --- | --- |
-| `presentation/router.py` | 좌표·시군구 오늘/주간 API 4개와 개인 조건 입력, 공통 오류·태그 설정 |
-| `presentation/schemas.py` | 기본·지역·개인화 응답 모델과 직렬화 |
+| `presentation/router.py` | 좌표·시군구 오늘/주간 추천과 피드백 API |
+| `presentation/schemas.py` | 추천 응답과 피드백 요청 모델 |
 | `application/services.py` | 공통 생성 검증과 시군구 공통 추천·개인화 조합 서비스 |
 | `application/ports.py` | 날씨 조회·추천 생성·공통 캐시·개인화 캐시 계약 |
 | `application/policies.py` | 로컬 우선·허용된 오류에만 클라우드 한 번 호출하는 정책 |
@@ -28,7 +28,7 @@
 
 Domain은 FastAPI·Pydantic·DB·외부 LLM 클라이언트를 import하지 않습니다. Application은 업무 절차와 계약을 정의하고 지역 검색·시군구 판정에는 weather의 공개 계약과 위치 모델을 사용합니다. 외부 통신과 저장 구현의 연결은 `bootstrap.py`에서 관리합니다. 추론 서버를 바꾸려면 OutfitRecommender를 구현하고 bootstrap의 연결을 교체합니다. 현재 구현을 LM Studio/vLLM에 그대로 연결하는 호환 기능은 아직 없습니다.
 
-`main.py`는 `presentation/router.py` 하나만 등록합니다. 좌표·시군구 경로의 핸들러도 이 파일 안에 직접 정의합니다. 기존 `/api/v1/outfits/today`, `/weekly`, `/regions/{location_id}/today`, `/regions/{location_id}/weekly` 주소를 유지합니다. 개인 조건의 추천 처리는 이 모듈에서, 로그인과 프로필 저장은 사용자 모듈에서 담당합니다. 화면이 저장된 프로필 조건을 추천 API에 전달하며 계정 식별자를 추천 캐시 키에 넣지 않습니다.
+`main.py`는 `presentation/router.py` 하나를 등록합니다. 이 라우터가 `/api/v1/outfits` 아래의 추천 API와 `/api/v1/outfit-feedback` 아래의 피드백 API를 함께 처리합니다. 개인 조건의 추천 처리는 이 모듈에서, 로그인과 프로필 저장은 사용자 모듈에서 담당합니다. 화면이 저장된 프로필 조건을 추천 API에 전달하며 계정 식별자를 추천 캐시 키에 넣지 않습니다.
 
 계층 폴더는 유지하고 같은 역할은 한 파일로 합칩니다. 좌표·시군구, 공통·개인화, 로컬·클라우드처럼 기능이나 제공사가 달라도 동일 역할의 코드는 같은 파일에 둡니다. 하위 기능별 폴더와 단순 전달용 진입 파일을 추가하지 않습니다.
 
@@ -88,7 +88,7 @@ STUDY_GEMINI_TIMEOUT_SECONDS=60
 STUDY_GEMINI_MAX_OUTPUT_TOKENS=8192
 ```
 
-JSON 스키마 출력을 지원하는 Gemini 모델을 설정하세요. 로컬 모델 미설정·모델 없음·연결 실패·시간 초과·잘못된 응답이면 Gemini를 한 번 호출합니다. 로컬 성공 시 클라우드 클라이언트를 생성하지 않습니다. 자동 전환을 켜도 일반 로컬 대기 제한 `STUDY_LLM_TIMEOUT_SECONDS`(기본 180초)를 유지합니다. `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS`를 명시한 경우에만 두 제한 중 작은 값을 적용합니다. 이 설정을 생략하거나 비워두면 모델 로딩과 생성에 기존 대기 시간을 그대로 사용할 수 있습니다.
+JSON 스키마 출력을 지원하는 Gemini 모델을 설정하세요. 자동 전환을 켜면 Ollama의 요청당 대기 제한은 기본 20초입니다. 시간 초과와 응답 검증 실패는 같은 재시도 1회를 공유합니다. 두 번째 시도도 실패하면 Gemini를 한 번 호출합니다. 모델 미설정·모델 없음·연결 실패는 즉시 전환합니다. `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS`를 지정하면 해당 값과 일반 로컬 대기 제한 `STUDY_LLM_TIMEOUT_SECONDS` 중 작은 값을 적용합니다.
 
 날씨 조회·입력 오류는 전환 대상이 아닙니다. Gemini까지 실패하면 공통 클라우드 오류를 반환하며 반복 재시도하지 않습니다. 로컬 모델을 비워두고 자동 전환을 켜면 바로 Gemini로 연결할 수도 있습니다.
 
@@ -108,12 +108,12 @@ SDK의 인증·할당량·서비스 장애와 시간 초과는 기존 공통 오
 
 ```dotenv
 STUDY_LLM_CLOUD_FALLBACK_ENABLED=true
-STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS=180
+STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS=20
 GEMINI_API_KEY=발급받은_API_키
 STUDY_GEMINI_MODEL=gemini-flash-latest
 ```
 
-위 예시는 느린 로컬 모델을 기다리도록 대기 시간을 180초로 설정합니다. 실제 로컬 대기 제한은 `STUDY_LLM_TIMEOUT_SECONDS`와 이 값 중 작은 값입니다. 연결이 즉시 거부되면 이 시간을 모두 기다리지 않고 클라우드로 전환하지만, 서버가 응답 없이 대기하면 제한 시간이 지난 뒤 전환합니다. 필요에 따라 로컬 생성 시간에 맞춰 조정합니다.
+Ollama 응답이 없으면 요청당 20초씩 두 번 시도한 뒤 Gemini로 전환합니다. 이 대기 제한은 개별 모델 호출에 적용되며, 날씨 조회와 Gemini 호출에도 별도의 시간이 소요됩니다.
 
 설정을 저장한 뒤 FastAPI를 재시작합니다. Ollama가 정상일 때 추천 응답의 `data.engine.provider`는 `ollama`, `fallback_used`는 `false`입니다. 자동 전환을 확인하려면 Ollama 트레이 앱을 완전히 종료하고 같은 옷차림 API를 호출합니다. 성공 시 `provider`는 `gemini`, `fallback_used`는 `true`, `fallback_reason`은 `OUTFIT_LLM_UNAVAILABLE`로 표시됩니다. 이 확인 과정에서는 Gemini API 할당량을 사용하며 계정의 요금제에 따라 비용이 발생할 수 있습니다. 사용 후 Ollama 앱을 다시 실행하면 다음 요청은 다시 로컬부터 시도합니다.
 
@@ -246,13 +246,16 @@ Qwen3 14B Q4_K_M, RTX 3090 환경에서 이전 입력과 새 입력·샘플링 �
 - LLM에는 기온·체감온도·비·눈·바람·자외선·날씨 한글 설명과 출력 스키마를 보냅니다. 모델은 의류와 설명만 생성합니다.
 - 날짜·개수·순서·필수 필드·문자열 길이와 타입을 검증하고 동일한 베스트·워스트는 거부합니다. 모델이 날씨나 추가 필드를 반환해 원본을 덮어쓸 수 없습니다.
 - JSON 검증은 형식과 원본 데이터 보존을 확인합니다. 자유 문장에 담긴 판단의 정확성과 모델별 추천 품질까지 보장하는 것은 아닙니다.
-- 로컬 실패 시 자동 전환을 켰으면 Gemini로 재요청합니다. 최종 실패 시 고정 의류·샘플 응답 없이 정해진 오류를 반환합니다.
-- 날씨 캐시는 재사용하지만 생성 결과는 캐시하지 않습니다. 같은 날씨여도 모델·실행 시점에 따라 추천 문장이 달라질 수 있습니다.
+- 공통·개인 로컬 추천은 스키마·날짜·품질 검증에 실패하면 검사 내용을 전달해 한 번 수정 요청합니다. 자동 전환이 켜져 있으면 시간 초과도 같은 재시도 횟수 안에서 한 번 다시 요청합니다.
+- 로컬 실패 시 자동 전환을 켰으면 Gemini로 한 번 전환합니다. 최종 실패 시 고정 의류·샘플 응답 없이 정해진 오류를 반환합니다.
+- 두 제공사의 공통·개인 생성은 각 시도의 입력·응답을 기록하고 최종 답변의 `engine.generation_id`로 신고·수정안과 연결합니다. 기존 캐시의 빈 생성 ID는 소급 생성하지 않습니다.
+- 날씨와 생성 결과는 위의 캐시 정책에 따라 재사용합니다. 실제 재생성 시에는 같은 날씨여도 모델·실행 시점에 따라 추천 문장이 달라질 수 있습니다.
 
 ## 오류와 테스트
 
 | 코드 | HTTP | 원인 |
 | --- | --- | --- |
+| `WEATHER_REGION_NOT_CONFIGURED` | 503 | 시군구 조회 키와 해당 좌표의 저장 판정이 없음. LLM 호출 이전에 중단됨 |
 | `OUTFIT_LLM_NOT_CONFIGURED` | 503 | 모델명 미설정 |
 | `OUTFIT_LLM_MODEL_NOT_FOUND` | 503 | Ollama가 모델을 찾지 못함(404) |
 | `OUTFIT_LLM_UNAVAILABLE` | 503 | 서버 연결 실패·추론 오류 |
@@ -265,6 +268,8 @@ Qwen3 14B Q4_K_M, RTX 3090 환경에서 이전 입력과 새 입력·샘플링 �
 | `OUTFIT_CLOUD_UNAVAILABLE` | 503 | 연결 실패·지원하지 않는 모델/요청 설정·API 서버 오류 |
 | `OUTFIT_CLOUD_TIMEOUT` | 504 | API 응답 시간 초과 |
 | `OUTFIT_CLOUD_INVALID_RESPONSE` | 502 | 거절·생성 중단·잘못된 JSON·날짜·구성 |
+
+화면의 “이 지역의 추천을 연결하지 못했어요. 지역 서비스 설정을 확인해야 해요.”는 `WEATHER_REGION_NOT_CONFIGURED` 안내입니다. 이 경우 프로젝트 루트 `.env`의 `VWORLD_API_KEY`와 발급 시 등록한 `STUDY_VWORLD_DOMAIN`을 설정하고 서버를 재시작합니다. `STUDY_LLM_CLOUD_FALLBACK_ENABLED=true`여도 시군구·날씨 조회 오류는 모델 호출로 우회하지 않습니다.
 
 날씨 조회 오류는 기존 WEATHER_* 코드로 전파합니다. 프로젝트 루트에서 `run.cmd -Test`로 검증합니다. `test_outfits.py`, `test_ollama.py`, `test_gemini.py`, `test_fallback.py`는 모의 LLM·합성 예보로 요청 구성·JSON 검증·오류·날짜·캐시 공유와 자동 전환을 확인합니다. 실제 Ollama·Gemini API의 연결과 생성 품질은 별도로 검증합니다. 자동 테스트는 유료 API를 호출하지 않습니다.
 

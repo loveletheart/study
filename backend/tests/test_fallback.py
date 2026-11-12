@@ -1,12 +1,16 @@
 """유료 호출 없이 로컬 우선 정책과 클라우드 자동 전환 확인."""
 
 # 표준 라이브러리
+import json
+import io
 import os
+import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock, patch
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
+from uuid import uuid4
 
 # 프로젝트 모듈
 from app.common.config import Settings, get_settings
@@ -20,17 +24,25 @@ from app.outfits.application.exceptions import (
 )
 from app.outfits.application.policies import FallbackOutfitRecommender
 from app.outfits.application.services import OutfitService
-from app.outfits.bootstrap import get_outfit_service
-from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender
+from app.outfits.bootstrap import _personal_recommender, get_outfit_service
+from app.outfits.feedback_bootstrap import feedback_store_for_path
+from app.outfits.domain.models import OutfitPreferences, OutfitStyle
+from app.outfits.infrastructure.prompts import PERSONALIZATION_VERSION
+from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender, LlmOutfitPersonalizer
 from app.outfits.presentation.router import get_today, get_weekly
 from app.weather.application.exceptions import WeatherProviderTimeoutError
 from tests import test_outfits as outfit_fixtures
 from tests.test_gemini import gemini_response
+from tests.test_ollama import chat_envelope, http_response
 
 
 class FallbackTests(unittest.TestCase):
     def setUp(self):
         """실제 날씨·LLM 통신을 대체한 추천 결과 준비"""
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.database_path = Path(directory.name) / "fallback.db"
+        self.addCleanup(feedback_store_for_path.cache_clear)
         fixture = outfit_fixtures.OutfitIntegrationTests()
         fixture.setUp()
         self.fixture = fixture
@@ -116,7 +128,7 @@ class FallbackTests(unittest.TestCase):
     def test_connection_failure_switches_real_clients_for_today_and_weekly(self):
         """로컬 연결 실패 시 실제 클라이언트 연결 흐름으로 클라우드 응답과 전환 정보를 확인한다."""
         settings = Settings(
-            "test", Path("unused.db"), llm_model="local-model", cloud_fallback_enabled=True,
+            "test", self.database_path, llm_model="local-model", cloud_fallback_enabled=True,
             gemini_api_key="test-key", gemini_model="cloud-model", fallback_local_timeout_seconds=180,
         )
         for route, days in [(get_today, self.forecast.days[:1]), (get_weekly, self.forecast.days)]:
@@ -148,11 +160,11 @@ class FallbackTests(unittest.TestCase):
     @patch("app.outfits.bootstrap._local_recommender")
     def test_bootstrap_opt_in_selects_timeout_and_creates_cloud_lazily(self, local, cloud, settings, weather):
         """기본 로컬 전용과 명시적 전환 설정의 연결 정책 확인"""
-        base = Settings("test", Path("unused.db"), llm_model="local")
+        base = Settings("test", self.database_path, llm_model="local")
         weather.return_value = self.fixture.weather_service
         for enabled, normal_timeout, fallback_timeout, expected_timeout in [
             (False, 180, None, 180), (False, 180, 15, 180),
-            (True, 180, None, 180), (True, 300, None, 300), (True, 3, None, 3),
+            (True, 180, None, 20), (True, 300, None, 20), (True, 3, None, 3),
             (True, 180, 15, 15), (True, 3, 15, 3), (True, 180, 300, 180),
         ]:
             with self.subTest(enabled=enabled, timeout=normal_timeout, fallback_timeout=fallback_timeout):
@@ -167,6 +179,209 @@ class FallbackTests(unittest.TestCase):
                 service.get_today(37, 127)
                 local.assert_called_once_with(settings.return_value, expected_timeout)
                 cloud.assert_not_called()
+
+    def test_personal_local_requests_keep_preferences_options_and_timeout_without_cloud(self):
+        """개인화에서도 설정한 문맥·샘플링·대기 제한과 조건을 전달하고 유료 호출을 생략한다."""
+        base = self.fixture.recommender.recommend(self.forecast.days[:1])
+        preferences = OutfitPreferences(style=OutfitStyle.FORMAL)
+        content = outfit_fixtures.generated_content([self.forecast.days[0].date.isoformat()])
+        for enabled, fallback_timeout, expected_timeout in [(False, 15, 180), (True, 15, 15), (True, 300, 180)]:
+            settings = Settings(
+                "test", self.database_path, llm_model="local-model", cloud_fallback_enabled=enabled,
+                fallback_local_timeout_seconds=fallback_timeout, llm_thinking=False, llm_top_p=0.8, llm_min_p=0,
+            )
+            with (
+                self.subTest(enabled=enabled, fallback_timeout=fallback_timeout),
+                patch("app.outfits.bootstrap.get_settings", return_value=settings),
+                patch("app.outfits.infrastructure.clients.urlopen", return_value=http_response(chat_envelope(content))) as local,
+                patch("app.outfits.bootstrap.GeminiClient") as cloud,
+            ):
+                result = LlmOutfitPersonalizer(_personal_recommender).personalize(base, preferences)
+                payload = json.loads(local.call_args.args[0].data)
+                self.assertEqual(local.call_args.kwargs["timeout"], expected_timeout)
+                self.assertEqual(payload["options"], {
+                    "temperature": 0.3, "top_p": 0.8, "min_p": 0, "num_predict": 2048, "num_ctx": 4096,
+                })
+                self.assertFalse(payload["think"])
+                self.assertEqual(json.loads(payload["messages"][1]["content"])["preferences"]["style"], "formal")
+                self.assertEqual(result.engine.prompt_version, PERSONALIZATION_VERSION)
+                self.assertFalse(result.engine.fallback_used)
+                cloud.assert_not_called()
+
+    def test_personal_local_failure_calls_cloud_once_with_preferences_and_fallback_metadata(self):
+        """로컬 개인화 실패 시 같은 조건을 SDK로 한 번 전달하고 전환 정보를 보존한다."""
+        base = self.fixture.recommender.recommend(self.forecast.days[:1])
+        preferences = OutfitPreferences(style=OutfitStyle.FORMAL)
+        settings = Settings(
+            "test", self.database_path, llm_model="local-model", cloud_fallback_enabled=True,
+            gemini_api_key="test-key", gemini_model="cloud-model", fallback_local_timeout_seconds=15,
+        )
+        with (
+            patch("app.outfits.bootstrap.get_settings", return_value=settings),
+            patch("app.outfits.infrastructure.clients.urlopen", side_effect=URLError("connection refused")) as local,
+            patch("app.outfits.infrastructure.clients.genai.Client") as sdk,
+        ):
+            cloud = sdk.return_value.__enter__.return_value.models.generate_content
+            cloud.return_value = gemini_response(outfit_fixtures.generated_content([self.forecast.days[0].date.isoformat()]))
+            with self.assertLogs("app.outfits.application.policies", level="WARNING"):
+                result = LlmOutfitPersonalizer(_personal_recommender).personalize(base, preferences)
+            local.assert_called_once()
+            self.assertEqual(local.call_args.kwargs["timeout"], 15)
+            cloud.assert_called_once()
+            content = json.loads(cloud.call_args.kwargs["contents"][0].parts[0].text)
+            self.assertEqual(content["preferences"]["style"], "formal")
+            self.assertEqual(result.recommendations[0].weather, base.recommendations[0].weather)
+            self.assertEqual(result.engine.provider, "gemini")
+            self.assertEqual(result.engine.model, "cloud-model")
+            self.assertEqual(result.engine.prompt_version, PERSONALIZATION_VERSION)
+            self.assertTrue(result.engine.fallback_used)
+            self.assertEqual(result.engine.fallback_reason, "OUTFIT_LLM_UNAVAILABLE")
+
+    def test_local_repair_preserves_both_attempts_and_final_generation_without_cloud(self):
+        """공통·개인화의 검증 실패나 시간 초과 후 로컬 재시도와 생성 기록을 검증한다."""
+        days = self.forecast.days[:1]
+        content = outfit_fixtures.generated_content([days[0].date.isoformat()])
+        base = self.fixture.recommender.recommend(days)
+        for preferences in (None, OutfitPreferences(style=OutfitStyle.FORMAL)):
+            for failure in ("schema", "date", "quality", "duplicate", "timeout"):
+                invalid = json.loads(content)
+                if failure == "schema":
+                    del invalid["days"][0]["best"]["shoes"]
+                elif failure == "date":
+                    invalid["days"][0]["date"] = "2000-01-01"
+                elif failure == "quality":
+                    invalid["days"][0]["best"]["shoes"] = "장갑"
+                elif failure == "duplicate":
+                    best = invalid["days"][0]["best"]
+                    invalid["days"][0]["worst"] = {
+                        **best, "accessories": best["accessories"] * 2,
+                    }
+                first_attempt = (
+                    TimeoutError() if failure == "timeout"
+                    else http_response(chat_envelope(json.dumps(invalid, ensure_ascii=False)))
+                )
+                path = self.database_path.with_name(f"repair-{preferences is not None}-{failure}.db")
+                settings = Settings("test", path, llm_model="local-model", cloud_fallback_enabled=True)
+                with (
+                    self.subTest(personal=preferences is not None, failure=failure),
+                    patch("app.outfits.bootstrap.get_settings", return_value=settings),
+                    patch("app.outfits.bootstrap.get_weather_service", return_value=self.fixture.weather_service),
+                    patch("app.outfits.infrastructure.clients.urlopen", side_effect=[
+                        first_attempt,
+                        http_response(chat_envelope(content)),
+                    ]) as local,
+                    patch("app.outfits.infrastructure.clients.genai.Client") as cloud,
+                ):
+                    result = (
+                        get_outfit_service().get_today(37, 127) if preferences is None
+                        else LlmOutfitPersonalizer(_personal_recommender).personalize(base, preferences)
+                    )
+                    self.assertEqual(local.call_count, 2)
+                    self.assertEqual([call.kwargs["timeout"] for call in local.call_args_list], [20, 20])
+                    cloud.assert_not_called()
+                    first, second = [json.loads(call.args[0].data) for call in local.call_args_list]
+                    self.assertNotIn("answer_checks", json.loads(first["messages"][1]["content"]))
+                    corrected_request = json.loads(second["messages"][1]["content"])
+                    if failure == "timeout":
+                        self.assertEqual(first, second)
+                    else:
+                        self.assertIn("answer_checks", corrected_request)
+                    if failure == "duplicate":
+                        self.assertIn("서로 다른 옷차림", corrected_request["answer_checks"][0])
+                    if preferences is not None:
+                        self.assertEqual(corrected_request["preferences"]["style"], "formal")
+                    store = feedback_store_for_path(path)
+                    self.assertEqual(len(store.generations()), 2)
+                    generation = store.generation(result.engine.generation_id)
+                    self.assertEqual(generation["raw_response"], content)
+                    self.assertEqual(generation["provider"], "ollama")
+                    self.assertFalse(result.engine.fallback_used)
+
+    def test_local_transport_failures_record_cloud_generation_and_allow_feedback(self):
+        """연결 실패·500·404·시간 초과 후 Gemini로 한 번 전환하고 원본 ID로 신고할 수 있다."""
+        days = self.forecast.days[:1]
+        content = outfit_fixtures.generated_content([days[0].date.isoformat()])
+        base = self.fixture.recommender.recommend(days)
+        cases = [
+            (lambda: URLError(ConnectionRefusedError()), "OUTFIT_LLM_UNAVAILABLE"),
+            (lambda: HTTPError("http://local/api/chat", 500, "failed", {}, io.BytesIO()), "OUTFIT_LLM_UNAVAILABLE"),
+            (lambda: HTTPError("http://local/api/chat", 404, "missing", {}, io.BytesIO()), "OUTFIT_LLM_MODEL_NOT_FOUND"),
+            (TimeoutError, "OUTFIT_LLM_TIMEOUT"),
+        ]
+        for personal in (False, True):
+            for index, (failure, reason) in enumerate(cases):
+                path = self.database_path.with_name(f"transport-{personal}-{index}.db")
+                settings = Settings(
+                    "test", path, llm_model="local-model", cloud_fallback_enabled=True,
+                    gemini_api_key="test-key", gemini_model="cloud-model",
+                )
+                with (
+                    self.subTest(personal=personal, reason=reason, case=index),
+                    patch("app.outfits.bootstrap.get_settings", return_value=settings),
+                    patch("app.outfits.bootstrap.get_weather_service", return_value=self.fixture.weather_service),
+                    patch("app.outfits.infrastructure.clients.urlopen", side_effect=failure()) as local,
+                    patch("app.outfits.infrastructure.clients.genai.Client") as sdk,
+                ):
+                    cloud = sdk.return_value.__enter__.return_value.models.generate_content
+                    local_attempts = 2 if reason == "OUTFIT_LLM_TIMEOUT" else 1
+
+                    def generate_cloud(**kwargs):
+                        self.assertEqual(local.call_count, local_attempts)
+                        return gemini_response(content)
+
+                    cloud.side_effect = generate_cloud
+                    with self.assertLogs("app.outfits.application.policies", level="WARNING"):
+                        result = (
+                            LlmOutfitPersonalizer(_personal_recommender).personalize(base, OutfitPreferences())
+                            if personal else get_outfit_service().get_today(37, 127)
+                        )
+                    self.assertEqual(local.call_count, local_attempts)
+                    self.assertEqual([call.kwargs["timeout"] for call in local.call_args_list], [20] * local_attempts)
+                    cloud.assert_called_once()
+                    self.assertEqual(result.engine.provider, "gemini")
+                    self.assertTrue(result.engine.fallback_used)
+                    self.assertEqual(result.engine.fallback_reason, reason)
+                    store = feedback_store_for_path(path)
+                    generation = store.generation(result.engine.generation_id)
+                    self.assertEqual(generation["provider"], "gemini")
+                    self.assertEqual(generation["raw_response"], content)
+                    self.assertEqual(len(store.generations()), local_attempts + 1)
+                    feedback = store.create(
+                        str(uuid4()), result.engine.generation_id, days[0].date.isoformat(), ["other"],
+                    )
+                    self.assertEqual(feedback["generation_id"], result.engine.generation_id)
+
+    def test_exhausted_local_repair_calls_cloud_once_and_retains_all_attempts(self):
+        """공통·개인화 모두 로컬 수정을 한 번으로 제한하고 클라우드의 최종 기록을 반환한다."""
+        days = self.forecast.days[:1]
+        content = outfit_fixtures.generated_content([days[0].date.isoformat()])
+        base = self.fixture.recommender.recommend(days)
+        for personal in (False, True):
+            path = self.database_path.with_name(f"exhausted-{personal}.db")
+            settings = Settings(
+                "test", path, llm_model="local-model", cloud_fallback_enabled=True,
+                gemini_api_key="test-key", gemini_model="cloud-model",
+            )
+            with (
+                self.subTest(personal=personal),
+                patch("app.outfits.bootstrap.get_settings", return_value=settings),
+                patch("app.outfits.bootstrap.get_weather_service", return_value=self.fixture.weather_service),
+                patch("app.outfits.infrastructure.clients.urlopen", side_effect=lambda *a, **kw: http_response(chat_envelope("{}"))) as local,
+                patch("app.outfits.infrastructure.clients.genai.Client") as sdk,
+            ):
+                cloud = sdk.return_value.__enter__.return_value.models.generate_content
+                cloud.return_value = gemini_response(content)
+                with self.assertLogs("app.outfits.application.policies", level="WARNING"):
+                    result = (
+                        LlmOutfitPersonalizer(_personal_recommender).personalize(base, OutfitPreferences())
+                        if personal else get_outfit_service().get_today(37, 127)
+                    )
+                self.assertEqual(local.call_count, 2)
+                cloud.assert_called_once()
+                self.assertEqual(result.engine.fallback_reason, "OUTFIT_LLM_INVALID_RESPONSE")
+                store = feedback_store_for_path(path)
+                self.assertEqual(len(store.generations()), 3)
+                self.assertEqual(store.generation(result.engine.generation_id)["provider"], "gemini")
 
 
 class CloudSettingsTests(unittest.TestCase):

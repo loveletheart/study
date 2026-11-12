@@ -1,7 +1,9 @@
-"""기본·지역·개인화 옷차림 API의 응답 모델."""
+"""옷차림 추천 응답과 피드백 요청 모델."""
 
 # 표준 라이브러리
 from datetime import date as Date, datetime
+from typing import Literal
+from uuid import UUID
 
 # 외부 라이브러리
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,7 +16,36 @@ from app.outfits.application.dto import (
     RegionOutfitResult,
 )
 from app.outfits.domain.models import OutfitType, TemperatureBasis, Activity, ColdSensitivity, OutfitStyle, ClothingPreference, AvoidItem
+from app.outfits.infrastructure.schemas import GeneratedDay
 from app.weather.presentation.schemas import LocationResponse
+
+
+Issue = Literal["clothing_category", "weather_logic", "explanation_mismatch", "preference_mismatch", "repetition", "other"]
+
+
+class FeedbackInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    issues: list[Issue] = Field(min_length=1, max_length=6)
+    note: str = Field(default="", max_length=2000)
+    corrected_day: GeneratedDay | None = None
+
+
+class CreateFeedback(FeedbackInput):
+    generation_id: UUID
+    date: Date
+
+
+class UpdateFeedback(FeedbackInput):
+    revision: int = Field(ge=1)
+
+
+class RevisionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+
+
+class ApproveFeedback(RevisionInput):
+    confirmed: Literal[True]
 
 
 class AttributeResponse(BaseModel):

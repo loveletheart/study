@@ -19,7 +19,7 @@ from app.outfits.domain.models import OutfitLook, OutfitType
 from app.outfits.domain.rules import build_weekly_wardrobe
 from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender, OllamaOutfitRecommender
 from app.outfits.infrastructure.schemas import GeneratedLook
-from app.outfits.infrastructure.prompts import LOOK_EXAMPLES, build_messages
+from app.outfits.infrastructure.prompts import LOOK_EXAMPLES
 from app.outfits.presentation.schemas import TodayOutfitResponse
 from tests import test_outfits as fixtures
 from tests.test_outfits import generated_content, weather

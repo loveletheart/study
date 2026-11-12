@@ -28,7 +28,7 @@ from app.outfits.infrastructure.recommenders import (
     StructuredOutfitRecommender,
 )
 from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache, CachedOutfitService
-from app.weather.application.exceptions import InvalidWeatherQueryError
+from app.weather.application.exceptions import InvalidWeatherQueryError, RegionNotConfiguredError
 from app.weather.application.services import WeatherService
 from app.weather.bootstrap import get_weather_service
 from app.weather.domain.models import Location
@@ -75,7 +75,7 @@ class RegionTests(unittest.TestCase):
             return json.dumps(generated, ensure_ascii=False)
 
         self.personal_llm.chat.side_effect = personal_content
-        self.personalizer = LlmOutfitPersonalizer(lambda base, preferences: StructuredOutfitRecommender(
+        self.personalizer = LlmOutfitPersonalizer(lambda preferences: StructuredOutfitRecommender(
             PersonalizationChatClient(self.personal_llm, preferences), "test-personal-model", "ollama",
         ))
         self.personal_cache = SQLitePersonalizedOutfitCache(
@@ -83,6 +83,19 @@ class RegionTests(unittest.TestCase):
             clock=lambda: self.fixture.now,
         )
         self.service = RegionOutfitService(self.catalog, self.cache, self.personal_cache, self.regions)
+
+    def test_unconfigured_region_stops_before_weather_or_model_generation(self):
+        """시군구 키 미설정은 모델 생성 이전의 지역 오류이며 클라우드로 우회하지 않는다."""
+        http = Mock()
+        regions = VWorldSigunguResolver(self.database_path, "", http=http)
+        service = RegionOutfitService(self.catalog, self.cache, self.personal_cache, regions)
+        with self.assertRaises(RegionNotConfiguredError) as error:
+            service.get_today(self.location.id, OutfitPreferences(style=OutfitStyle.FORMAL))
+        self.assertEqual(error.exception.error_code.value, "WEATHER_REGION_NOT_CONFIGURED")
+        self.factory.assert_not_called()
+        self.fixture.http.get.assert_not_called()
+        self.personal_llm.chat.assert_not_called()
+        http.get.assert_not_called()
 
     def test_different_preferences_share_one_generation_and_do_not_mutate_base(self):
         """동일 동네 사용자들의 취향 차이는 공통 결과·캐시 키를 오염시키지 않는다."""

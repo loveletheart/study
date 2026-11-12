@@ -2,7 +2,6 @@
 
 # 표준 라이브러리
 import json
-import socket
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -38,10 +37,10 @@ class JsonHttpClient:
             if exc.code >= 500:
                 raise WeatherProviderUnavailableError() from exc
             raise WeatherProviderDataError() from exc
-        except (TimeoutError, socket.timeout) as exc:
+        except TimeoutError as exc:
             raise WeatherProviderTimeoutError() from exc
         except URLError as exc:
-            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            if isinstance(exc.reason, TimeoutError):
                 raise WeatherProviderTimeoutError() from exc
             raise WeatherProviderUnavailableError() from exc
         except (OSError, HTTPException) as exc:

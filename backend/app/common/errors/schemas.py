@@ -5,7 +5,7 @@ from pydantic import Field
 
 # 프로젝트 모듈
 from app.common.errors.codes import ErrorCode
-from app.common.responses import ErrorDetail as ErrorDetail, ResponseEnvelope
+from app.common.responses import ResponseEnvelope
 
 
 class ErrorResponse(ResponseEnvelope[None, ErrorCode]):
