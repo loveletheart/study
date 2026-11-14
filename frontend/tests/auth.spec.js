@@ -187,6 +187,19 @@ test('잘못된 로그인은 오류를 표시하고 재입력할 수 있다', as
   await expect(page.getByRole('heading', { name: '먼저, 당신의 하루를 알려주세요.' })).toBeVisible()
 })
 
+test('저장한 지역이 없는 계정은 기본 지역을 표시하고 취향만 저장할 수 있다', async ({ page }) => {
+  const state = await mockAccount(page, { signedIn: true })
+  await page.goto('./')
+  await expect(page.locator('.toolbar-caption')).toHaveText('기본 지역 · 서울특별시 중구')
+  expect(state.calls.filter((call) => call.method === 'PUT')).toHaveLength(0)
+  await page.getByRole('button', { name: '내 취향 설정' }).click()
+  await page.getByRole('radio', { name: '추위를 타요' }).check()
+  await page.getByRole('button', { name: '내 취향 반영하기' }).click()
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  expect(state.calls.find((call) => call.method === 'PUT').values.location_id).toBeNull()
+  await expect(page.locator('.toolbar-caption')).toHaveText('기본 지역 · 서울특별시 중구')
+})
+
 test('프로필 저장 실패는 초안을 유지하고 재시도 성공 후에만 적용한다', async ({ page }) => {
   const state = await mockAccount(page, { signedIn: true, profileReady: true })
   state.failSave = true

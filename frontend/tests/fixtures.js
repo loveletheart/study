@@ -23,6 +23,14 @@ export const busan = {
   longitude: 129.0756,
   admin1: '부산광역시',
 }
+export const defaultDistrict = {
+  ...location,
+  id: 1845068,
+  name: '중구',
+  latitude: 37.55986,
+  longitude: 126.99398,
+  admin2: '중구',
+}
 export const preferences = {
   cold_sensitivity: 'normal',
   style: 'default',
@@ -188,13 +196,21 @@ export async function mockApi(
     const path = url.pathname
     if (path === '/api/v1/users/me')
       return route.fulfill({ status: 401, json: failure('AUTH_REQUIRED', '로그인이 필요합니다.') })
-    if (path.endsWith('/weather/locations'))
+    if (path.endsWith('/weather/locations')) {
+      const query = url.searchParams.get('query')
+      const locations =
+        query === '서울특별시 중구'
+          ? [defaultDistrict]
+          : query === '없는동네'
+            ? []
+            : [location, busan]
       return route.fulfill({
         json: success({
-          locations: url.searchParams.get('query') === '없는동네' ? [] : [location, busan],
+          locations,
           attribution: 'GeoNames · Open-Meteo',
         }),
       })
+    }
     if (path.endsWith('/weather/today')) return route.fulfill({ json: success(weather) })
     if (path.endsWith('/weather/weekly')) return route.fulfill({ json: success(weeklyWeather) })
     if (path.includes('/outfits/regions/')) {

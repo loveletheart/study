@@ -24,7 +24,7 @@ const model = defineModel<Preferences>({ required: true })
   </fieldset>
   <fieldset class="preference-group">
     <legend>선호하는 의류 유형 <span class="optional-label">선택</span></legend>
-    <p>성별과 관계없이 즐겨 입는 의류를 골라 주세요.</p>
+    <p>남성복이나 여성복을 선택하면 해당 스타일과 공용 의류를 추천해요.</p>
     <div class="option-row">
       <label
         v-for="[value, label] in clothingOptions"

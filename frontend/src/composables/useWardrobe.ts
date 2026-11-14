@@ -1,10 +1,11 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { ApiError, errorMessage, getOutfit, getWeather } from '../api'
+import { ApiError, errorMessage, getOutfit, getWeather, searchLocations } from '../api'
 import type { Account, Location, OutfitResult, Period, Preferences, WeatherResult } from '../types'
 import { defaultPreferences, avoidOptions } from '../utils'
 
 const defaults = defaultPreferences()
 const storageKey = 'ondo.settings.v1'
+const defaultRegionQuery = '서울특별시 중구'
 
 function restore(): { location: Location | null; preferences: Preferences } {
   try {
@@ -56,7 +57,10 @@ function restore(): { location: Location | null; preferences: Preferences } {
 
 export function useWardrobe() {
   const saved = restore()
-  const location = ref<Location | null>(saved.location)
+  const selectedLocation = ref<Location | null>(saved.location)
+  const defaultLocation = ref<Location | null>(null)
+  const location = computed(() => selectedLocation.value ?? defaultLocation.value)
+  const usingDefaultLocation = computed(() => !selectedLocation.value && !!defaultLocation.value)
   const preferences = ref<Preferences>(saved.preferences)
   const period = ref<Period>('today')
   const weather = ref<WeatherResult | null>(null)
@@ -76,7 +80,7 @@ export function useWardrobe() {
     try {
       localStorage.setItem(
         storageKey,
-        JSON.stringify({ location: location.value, preferences: preferences.value }),
+        JSON.stringify({ location: selectedLocation.value, preferences: preferences.value }),
       )
       storageNotice.value = ''
     } catch {
@@ -140,9 +144,26 @@ export function useWardrobe() {
     void loadOutfit()
   }
   function selectLocation(value: Location) {
-    location.value = value
+    selectedLocation.value = value
     save()
     reload()
+  }
+  async function loadDefaultLocation(signal: AbortSignal) {
+    if (location.value) return
+    try {
+      // 검색 결과의 지역 ID가 서버에 등록된 뒤 추천을 요청한다.
+      const result = await searchLocations(defaultRegionQuery, signal)
+      if (signal.aborted || selectedLocation.value) return
+      const district = result.locations.find(
+        (candidate) => candidate.admin1 === '서울특별시' && candidate.name === '중구',
+      )
+      if (district) {
+        defaultLocation.value = district
+        reload()
+      }
+    } catch {
+      // 기본 지역 조회에 실패하면 첫 화면에서 사용자가 직접 지역을 검색할 수 있다.
+    }
   }
   function selectPeriod(value: Period) {
     if (period.value !== value) {
@@ -174,7 +195,7 @@ export function useWardrobe() {
     const next = account
       ? { location: account.profile.location, preferences: account.profile.preferences }
       : restore()
-    location.value = next.location
+    selectedLocation.value = next.location
     preferences.value = {
       ...defaultPreferences(),
       ...next.preferences,
@@ -185,6 +206,7 @@ export function useWardrobe() {
   }
   return {
     location,
+    usingDefaultLocation,
     preferences,
     period,
     weather,
@@ -197,6 +219,7 @@ export function useWardrobe() {
     storageNotice,
     isPersonalized,
     selectLocation,
+    loadDefaultLocation,
     selectPeriod,
     applyPreferences,
     loadWeather,
