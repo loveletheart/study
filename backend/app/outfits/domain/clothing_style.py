@@ -6,9 +6,11 @@ from unicodedata import normalize
 from app.outfits.domain.models import ClothingPreference
 
 
-_MENSWEAR = re.compile(r"남성\s*(?:용|복|전용|의류)|남자\s*(?:용|전용)|\b(?:menswear|men['’]s|for men)\b")
+_MENSWEAR = re.compile(
+    r"^남성\s+|남성\s*(?:용|복|전용|의류)|남자\s*(?:용|전용)|\b(?:menswear|men['\u2019]s|for men)\b"
+)
 _WOMENSWEAR = re.compile(
-    r"여성\s*(?:용|복|전용|의류)|여자\s*(?:용|전용)|\b(?:womenswear|women['’]s|for women)\b"
+    r"^여성\s+|여성\s*(?:용|복|전용|의류)|여자\s*(?:용|전용)|\b(?:womenswear|women['\u2019]s|for women)\b"
     r"|원피스|스커트|치마|하이힐|스틸레토"
     r"|드레스(?![\s-]*(?:셔츠|슈즈|구두|부츠|신발))"
     r"|\bdress(?:es)?\b(?![\s-]*(?:shirts?|shoes?|boots?))|\bskirts?\b"

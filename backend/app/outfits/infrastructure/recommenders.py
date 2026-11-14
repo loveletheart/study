@@ -163,13 +163,17 @@ class GeminiOutfitRecommender(StructuredOutfitRecommender):
 
 class PersonalizationChatClient:
     @property
+    def preferences(self) -> OutfitPreferences:
+        return self._preferences
+
+    @property
     def last_generation_id(self):
         return getattr(self._client, 'last_generation_id', None)
 
     def __init__(self, client: StructuredChatClient, preferences: OutfitPreferences) -> None:
         """날씨 검증용 클라이언트에 개인화 문맥을 추가한다."""
         self._client = client
-        self.preferences = preferences
+        self._preferences = preferences
 
     def chat(self, model: str, messages: list[dict[str, str]], schema: dict) -> str:
         """응답 문구를 코드에서 합성하지 않고 모델의 검증 대상 JSON으로 받는다."""
