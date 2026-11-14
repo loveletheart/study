@@ -26,6 +26,7 @@ from app.outfits.domain.models import (
     TemperatureBasis,
     OutfitPreferences,
 )
+from app.outfits.domain.clothing_style import conflicting_clothes
 from app.outfits.domain.rules import temperature_reference
 from app.outfits.infrastructure.schemas import GeneratedLook, GeneratedResponse
 from app.outfits.infrastructure.prompts import (
@@ -73,6 +74,7 @@ class StructuredOutfitRecommender:
     def _generate(self, days: tuple[OutfitWeather, ...], schema: dict) -> GeneratedResponse:
         """검증 실패와 허용된 시간 초과가 같은 재시도 횟수를 사용한다."""
         messages = build_messages(days, schema)
+        preferences = asdict(self._client.preferences) if isinstance(self._client, PersonalizationChatClient) else None
         for attempt in range(self._repair_attempts + 1):
             last_attempt = attempt == self._repair_attempts
             try:
@@ -93,7 +95,7 @@ class StructuredOutfitRecommender:
                         and set(best.accessories) == set(worst.accessories)
                     ):
                         errors.append("베스트와 워스트는 서로 다른 옷차림으로 작성해 주세요.")
-                    quality = check_day(result.model_dump(mode='json'), asdict(weather))
+                    quality = check_day(result.model_dump(mode='json'), asdict(weather), preferences)
                     errors.extend(issue['message'] for issue in quality['errors'])
                 if errors:
                     raise ValueError(' '.join(dict.fromkeys(errors)))
@@ -167,13 +169,17 @@ class PersonalizationChatClient:
     def __init__(self, client: StructuredChatClient, preferences: OutfitPreferences) -> None:
         """날씨 검증용 클라이언트에 개인화 문맥을 추가한다."""
         self._client = client
-        self._preferences = preferences
+        self.preferences = preferences
 
     def chat(self, model: str, messages: list[dict[str, str]], schema: dict) -> str:
         """응답 문구를 코드에서 합성하지 않고 모델의 검증 대상 JSON으로 받는다."""
         content = json.loads(messages[1]["content"])
-        content["preferences"] = asdict(self._preferences)
-        content["personal_requirements"] = _personal_requirements(self._preferences)
+        content["preferences"] = asdict(self.preferences)
+        content["personal_requirements"] = _personal_requirements(self.preferences)
+        content["look_examples"] = [
+            look for look in content["look_examples"]
+            if not conflicting_clothes(look, self.preferences.clothing_preference)
+        ]
         contextual = [
             {"role": "system", "content": messages[0]["content"] + "\n" + PERSONALIZATION_INSTRUCTION},
             {"role": "user", "content": json.dumps(content, ensure_ascii=False, allow_nan=False, default=str)},
