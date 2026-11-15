@@ -18,15 +18,16 @@ def connect_database(database_path: Path | None = None) -> sqlite3.Connection:
 
 
 def initialize_database(database_path: Path | None = None) -> None:
-    """테이블이 없으면 생성"""
+    """테이블을 생성하고 기존 인증 스키마를 갱신한다."""
     # 업무별 테이블 정의는 해당 업무의 infrastructure에서 관리한다.
     from app.users.infrastructure.models import CREATE_USERS_TABLE, initialize_auth_tables
 
-    connection = connect_database(database_path)
+    settings = get_settings()
+    connection = connect_database(database_path if database_path is not None else settings.database_path)
     try:
         with connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(CREATE_USERS_TABLE)
-            initialize_auth_tables(connection)
+            initialize_auth_tables(connection, settings.session_max_age_seconds)
     finally:
         connection.close()

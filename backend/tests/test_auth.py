@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from app.common.config import Settings
 from app.common.database import initialize_database, connect_database
 from app.users.application.services import AuthService, UserService
 from app.users.application.dto import CreateUserCommand
@@ -147,9 +148,10 @@ class AuthenticationTests(unittest.TestCase):
             connection.execute("UPDATE user_sessions SET expires_at = ?", (self.now + 7 * 86400,))
             connection.execute("ALTER TABLE user_sessions DROP COLUMN last_active_at")
         self.now += 60
-        initialize_database(self.path)
-        self.assertEqual(self.client.get("/api/v1/users/me").status_code, 200)
-        initialize_database(self.path)
+        with patch("app.common.database.get_settings", return_value=Settings("test", self.path)):
+            initialize_database(self.path)
+            self.assertEqual(self.client.get("/api/v1/users/me").status_code, 200)
+            initialize_database(self.path)
         with closing(connect_database(self.path)) as connection:
             self.assertEqual(connection.execute("SELECT last_active_at FROM user_sessions").fetchone()[0], self.now)
         self.now += 30 * 60
@@ -158,6 +160,31 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(login.status_code, 200)
         self.assertEqual(login.json()["data"]["user"]["id"], registered_id)
         self.assertEqual(self.store.credentials("user@example.com")[1], saved_hash)
+
+    def test_legacy_session_expires_at_configured_limit_despite_recent_activity(self):
+        self.service = AuthService(
+            self.store, self.security, self.locations, clock=lambda: self.now,
+            max_age_seconds=100, idle_seconds=30,
+        )
+        self.signup()
+        issued_at = self.now
+        with closing(connect_database(self.path)) as connection, connection:
+            connection.execute("UPDATE user_sessions SET expires_at = ?", (issued_at + 7 * 86400,))
+            connection.execute("ALTER TABLE user_sessions DROP COLUMN last_active_at")
+
+        self.now = issued_at + 10
+        settings = Settings("test", self.path, session_max_age_seconds=100, session_idle_seconds=30)
+        with patch("app.common.database.get_settings", return_value=settings):
+            initialize_database()
+            for elapsed in (25, 50, 75, 99):
+                self.now = issued_at + elapsed
+                self.assertEqual(self.client.get("/api/v1/users/me").status_code, 200)
+            initialize_database()
+
+        self.now = issued_at + 100
+        expired = self.client.get("/api/v1/users/me")
+        self.assertEqual(expired.status_code, 401)
+        self.assertEqual(expired.json()["code"], "AUTH_SESSION_EXPIRED")
 
     def test_login_failure_does_not_disclose_account_existence(self):
         self.signup()

@@ -25,17 +25,22 @@ AUTH_TABLES = (
     "CREATE TABLE IF NOT EXISTS user_recommendation_profiles (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, payload BLOB NOT NULL)",
     "CREATE TABLE IF NOT EXISTS auth_rate_limits (bucket TEXT PRIMARY KEY, window_start REAL NOT NULL, attempts INTEGER NOT NULL)",
 )
+LEGACY_SESSION_LIFETIME_SECONDS = 7 * 86400
 
 
-def initialize_auth_tables(connection: sqlite3.Connection) -> None:
-    """기존 계정과 세션을 보존하며 마지막 활동 시각을 추가한다."""
+def initialize_auth_tables(connection: sqlite3.Connection, session_max_age_seconds: int) -> None:
+    """이전 세션의 마지막 활동을 초기화하고 최대 유지 시간을 적용한다."""
     for statement in AUTH_TABLES:
         connection.execute(statement)
     session_columns = {row["name"] for row in connection.execute("PRAGMA table_info(user_sessions)")}
     if "last_active_at" not in session_columns:
         connection.execute("ALTER TABLE user_sessions ADD COLUMN last_active_at REAL NOT NULL DEFAULT 0")
-        # 이전 스키마에서는 발급 후 정확히 7일이 지나면 만료됐다.
-        connection.execute("UPDATE user_sessions SET last_active_at = expires_at - ?", (7 * 86400,))
+        # 이전 7일 만료 시각으로 발급 시각을 복원하고 기존 만료보다 늦어지지 않게 한다.
+        connection.execute(
+            "UPDATE user_sessions SET last_active_at = expires_at - ?, "
+            "expires_at = MIN(expires_at, expires_at - ? + ?)",
+            (LEGACY_SESSION_LIFETIME_SECONDS, LEGACY_SESSION_LIFETIME_SECONDS, session_max_age_seconds),
+        )
 
 
 def user_from_row(row: sqlite3.Row) -> User:
