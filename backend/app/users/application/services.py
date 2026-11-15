@@ -8,6 +8,7 @@ import time
 from typing import Callable
 
 # 프로젝트 모듈
+from app.common.config import DEFAULT_SESSION_IDLE_SECONDS, DEFAULT_SESSION_MAX_AGE_SECONDS
 from app.users.application.dto import CreateUserCommand, UserDTO
 from app.users.application.exceptions import UserNotFoundError
 from app.users.application.unit_of_work import UserUnitOfWork
@@ -45,10 +46,19 @@ class UserService:
 
 
 class AuthService:
-    SESSION_SECONDS = 7 * 86400
-
-    def __init__(self, store: AuthStore, passwords: PasswordSecurity, locations: LocationCatalog, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self, store: AuthStore, passwords: PasswordSecurity, locations: LocationCatalog,
+        clock: Callable[[], float] = time.time, *,
+        max_age_seconds: int = DEFAULT_SESSION_MAX_AGE_SECONDS,
+        idle_seconds: int = DEFAULT_SESSION_IDLE_SECONDS,
+    ) -> None:
         self._store, self._passwords, self._locations, self._clock = store, passwords, locations, clock
+        self._max_age_seconds = max_age_seconds
+        self._idle_seconds = idle_seconds
+
+    @property
+    def session_max_age_seconds(self) -> int:
+        return self._max_age_seconds
 
     @staticmethod
     def _token_hash(token: str) -> str:
@@ -76,11 +86,16 @@ class AuthService:
     def _start_session(self, user: User, previous: str | None) -> tuple[AccountDTO, str]:
         token = secrets.token_urlsafe(32)
         now = self._clock()
-        self._store.create_session(user.id, self._token_hash(token), now + self.SESSION_SECONDS, now, self._token_hash(previous) if previous else None)
+        self._store.create_session(
+            user.id, self._token_hash(token), now + self.session_max_age_seconds, now,
+            self._token_hash(previous) if previous else None,
+        )
         return self._account(user), token
 
     def authenticate(self, token: str | None) -> User:
-        user = self._store.session_user(self._token_hash(token), self._clock()) if token and len(token) == 43 else None
+        if not token or len(token) != 43:
+            raise AuthenticationRequiredError()
+        user = self._store.session_user(self._token_hash(token), self._clock(), self._idle_seconds)
         if user is None:
             raise AuthenticationRequiredError()
         return user

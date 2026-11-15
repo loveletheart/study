@@ -15,6 +15,8 @@ from dotenv import dotenv_values
 
 # 프로젝트 경로
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_SESSION_MAX_AGE_SECONDS = 1 * 86400
+DEFAULT_SESSION_IDLE_SECONDS = 30 * 60
 
 
 # 애플리케이션 설정
@@ -46,6 +48,8 @@ class Settings:
     vworld_api_key: str = field(default="", repr=False)
     vworld_domain: str = ""
     session_cookie_secure: bool = False
+    session_max_age_seconds: int = DEFAULT_SESSION_MAX_AGE_SECONDS
+    session_idle_seconds: int = DEFAULT_SESSION_IDLE_SECONDS
 
 
 # 설정값 검증
@@ -104,6 +108,12 @@ def get_settings() -> Settings:
     database_path = Path(values.get("STUDY_DATABASE_PATH") or "study.db")
     if not database_path.is_absolute():
         database_path = PROJECT_ROOT / database_path
+    session_max_age = _integer_setting(
+        values, "STUDY_SESSION_MAX_AGE_SECONDS", DEFAULT_SESSION_MAX_AGE_SECONDS, 1, 400 * 86400,
+    )
+    session_idle = _integer_setting(
+        values, "STUDY_SESSION_IDLE_SECONDS", min(DEFAULT_SESSION_IDLE_SECONDS, session_max_age), 1, session_max_age,
+    )
     return Settings(
         app_name=values.get("STUDY_APP_NAME") or "Study API",
         database_path=database_path,
@@ -137,4 +147,6 @@ def get_settings() -> Settings:
         vworld_api_key=(values.get("VWORLD_API_KEY") or "").strip(),
         vworld_domain=(values.get("STUDY_VWORLD_DOMAIN") or "").strip(),
         session_cookie_secure=_boolean_setting(values, "STUDY_SESSION_COOKIE_SECURE"),
+        session_max_age_seconds=session_max_age,
+        session_idle_seconds=session_idle,
     )

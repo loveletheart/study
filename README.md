@@ -1,6 +1,18 @@
 # FastAPI와 DDD 학습 프로젝트
 
-업무별로 폴더를 나누고, 각 업무 내부를 presentation / application / domain / infrastructure 계층으로 구성합니다. 날씨 조회, 옷차림 추천, 이메일·비밀번호 회원가입과 로그인, 계정별 추천 프로필을 제공합니다.
+**온도**는 날씨를 조회하고 오늘과 주간의 옷차림을 추천하는 서비스입니다. 계정에 지역과 취향을 저장하고, 추천 결과를 신고하거나 수정할 수 있습니다.
+
+Python 백엔드는 `backend/`, Vue 프론트엔드는 `frontend/`에 있습니다. 백엔드는 사용자, 날씨, 옷차림 업무를 구분하고 각 업무를 `presentation`, `application`, `domain`, `infrastructure` 계층으로 구성합니다.
+
+## 기술 선택 이유
+
+### FastAPI를 선택한 이유
+
+Flask로 개발할 때 비동기 뷰를 쓰기 위해 의존성을 추가하고, Swagger UI도 별도로 구성해야 했습니다. 이번 프로젝트에서는 Vue 화면과 백엔드를 나눠 개발하면서 날씨 조회와 로컬 Ollama를 연결한 추천 API를 Swagger에서 바로 확인하고 싶었습니다. 그래서 비동기 라우트와 Swagger UI 자동 생성을 기본으로 제공하는 FastAPI를 선택했습니다. 
+
+### Vue를 선택한 이유
+
+ Node.js 환경에서 화면을 간단하게 구성하려고 했습니다. 개발을 진행하면서 지역을 검색하고 취향을 입력한 뒤 옷차림을 확인하는 과정을 브라우저에서 직접 테스트할 필요가 생겼습니다. 그래서 지역 검색, 취향 입력, 추천 카드를 컴포넌트로 나누고 실제 사용 흐름을 화면에서 검증할 수 있도록 Vue를 선택했습니다. [프론트엔드 개발과 테스트](frontend/README.md)
 
 ## 실행
 
@@ -28,12 +40,12 @@ VS Code에서는 **Ctrl+Shift+B**로 같은 실행 절차를 사용할 수 있�
 .\run.cmd -Port 8001
 ```
 
-- Swagger: http://127.0.0.1:8000/docs
-- 상태 확인: http://127.0.0.1:8000/health
+- [Swagger](http://127.0.0.1:8000/docs)
+- [서버 상태 확인](http://127.0.0.1:8000/health)
 
 ## 프론트엔드 MVP
 
-Vue 기반 **온도 — 날씨를 입는 일상** 화면에서 지역 검색, 현재·시간별 날씨, 오늘·7일 옷차림과 개인 취향 설정을 사용할 수 있습니다. 둘러보기는 브라우저에 설정을 저장하고, 로그인하면 지역·체감 온도·스타일·활동·선호 의류·피할 의류를 계정에 저장합니다.
+현재·시간별 날씨를 확인하고 오늘과 주간의 베스트·워스트 옷차림을 비교할 수 있습니다. 저장된 지역이 없으면 서울특별시 중구를 표시합니다. 둘러보기 설정은 브라우저에 저장하고, 로그인한 사용자는 지역·체감 온도·스타일·활동·선호 의류·피할 의류를 계정에 저장할 수 있습니다.
 
 백엔드를 실행한 상태에서 별도 터미널로 아래 명령을 실행합니다.
 
@@ -43,15 +55,33 @@ npm ci
 npm run dev
 ```
 
-화면: http://127.0.0.1:5173/app/
+[프론트엔드 개발 화면](http://127.0.0.1:5173/app/)
 
-`frontend`에서 `npm run build` 후 백엔드를 재시작하면 http://127.0.0.1:8000/app/ 에서 화면과 API를 함께 제공합니다. Node.js 요구사항, 다른 포트 연결, 브라우저 시험과 주간 추천 준비 상태는 [프론트엔드 문서](frontend/README.md)를 확인하세요.
+`frontend`에서 `npm run build` 후 백엔드를 재시작하면 화면과 API를 같은 서버에서 사용할 수 있습니다. [통합 화면](http://127.0.0.1:8000/app/) · [프론트엔드 실행 안내](frontend/README.md)
 
 회원가입은 `/app/#signup`, 로그인은 `/app/#login`, 추천 프로필은 `/app/#profile`에서 제공합니다. 회원가입 뒤 프로필 설정으로 이동하며 언제든 나중에 설정할 수 있습니다. 계정 저장·인증 API와 기존 사용자 데이터의 호환 범위는 [사용자 기능 문서](backend/app/users/README.md)를 확인하세요.
 
-## 날씨 API
+## API 라우터
 
-Python 코드는 `backend/`, Vue 화면은 `frontend/`에 있고, `.venv`, `.env`, 실행 스크립트와 기존 `study.db`는 프로젝트 루트에 있습니다.
+`backend/main.py`에서 사용자, 날씨, 옷차림 라우터를 `/api/v1` 아래에 등록합니다. 피드백 경로는 옷차림 라우터에 포함됩니다. 전체 요청·응답 명세는 [Swagger](http://127.0.0.1:8000/docs)에서 확인할 수 있습니다.
+
+### 사용자와 인증
+
+| API | 역할 |
+| --- | --- |
+| `POST /api/v1/users/auth/register` | 닉네임·이메일·비밀번호로 가입하고 세션 쿠키 발급 |
+| `POST /api/v1/users/auth/login` | 이메일·비밀번호를 확인하고 현재 브라우저의 이전 세션 교체 |
+| `POST /api/v1/users/auth/logout` | 현재 세션을 폐기하고 쿠키 삭제 |
+| `GET /api/v1/users/me` | 로그인한 본인의 계정과 추천 프로필 조회 |
+| `PUT /api/v1/users/me/profile` | 본인의 닉네임·지역·추천 취향 저장 |
+| `POST /api/v1/users` | 이름과 이메일로 사용자 레코드를 생성하는 DDD 실습 API |
+| `GET /api/v1/users/{user_id}` | 로그인한 본인의 사용자 정보 조회 |
+
+세션은 로그인 후 **최대 1일(24시간)** 유지됩니다. 인증 요청이 30분 동안 없으면 먼저 만료되며, 화면은 다음 인증 확인에서 다시 로그인하도록 안내합니다. 세션 쿠키에는 `HttpOnly`와 `SameSite=Lax`가 적용되고, HTTPS에서는 `Secure`가 추가됩니다. 비밀번호는 개별 무작위 솔트를 사용해 scrypt로 해시한 뒤 SQLite의 `user_credentials.password_hash`에 저장합니다. [사용자 기능 문서](backend/app/users/README.md)
+
+인증·프로필·피드백 변경 요청을 직접 보낼 때는 `X-Ondo-Request: 1` 헤더를 포함합니다. 보호 API에는 로그인 응답에서 받은 세션 쿠키도 함께 보냅니다.
+
+### 날씨
 
 | API | 역할 |
 | --- | --- |
@@ -63,7 +93,7 @@ Python 코드는 `backend/`, Vue 화면은 `frontend/`에 있고, `.venv`, `.env
 
 응답 필드·오류 코드·캐시 동작은 [날씨 기능 문서](backend/app/weather/README.md)에 정리했습니다.
 
-## 옷차림 추천 API
+### 옷차림 추천
 
 | API | 역할 |
 | --- | --- |
@@ -92,11 +122,25 @@ STUDY_GEMINI_MODEL=gemini-flash-latest
 
 클라우드는 Google GenAI 공식 Python SDK와 JSON 스키마 출력을 사용합니다. 자동 전환을 켜면 Ollama 요청당 기본 20초를 기다립니다. 시간 초과 시 한 번 다시 요청하고, 다시 실패하면 Gemini를 호출합니다. `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS`를 설정하면 해당 값과 `STUDY_LLM_TIMEOUT_SECONDS` 중 작은 값을 적용합니다. Gemini는 기본 60초입니다. 로컬 모델 미설정도 전환 대상이며, 응답의 `data.engine`에서 실제 제공사·모델·전환 여부를 확인합니다.
 
+### 추천 피드백과 학습자료
+
+| API | 역할 |
+| --- | --- |
+| `POST /api/v1/outfit-feedback` | 추천 답변 신고와 수정안 초안 등록 |
+| `GET /api/v1/outfit-feedback` | 내 신고와 수정안 목록 조회 |
+| `GET /api/v1/outfit-feedback/{identifier}` | 내 신고의 원본 답변, 날씨, 수정안과 검증 결과 조회 |
+| `PUT /api/v1/outfit-feedback/{identifier}` | 내 수정안 초안 편집 |
+| `POST /api/v1/outfit-feedback/{identifier}/approve` | 검증을 통과한 내 수정안 승인 |
+| `POST /api/v1/outfit-feedback/{identifier}/reject` | 내 수정안 거절 |
+| `GET /api/v1/outfit-feedback/export` | 본인이 승인한 수정안을 학습자료 형식으로 조회 |
+
+추천 화면에서 로그인 후 **답변 문제 신고·수정**과 **내 수정안 검수**를 사용할 수 있습니다. 화면에서 승인한 자료를 JSONL로 내려받을 수 있습니다. [피드백 검수와 학습자료 안내](FEEDBACK.md)
+
 ## API 설명과 공통 오류
 
 Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를 펼치면 한국어 기능 설명, 입력 조건, 응답 필드와 오류 코드별 예시를 확인할 수 있습니다. 내부 메서드는 함수 본문 첫 줄의 짧은 docstring으로 역할을 표시합니다.
 
-모든 API는 `code`, `message`, `data`, `details` 형식을 사용합니다. 성공 결과는 기존 최상위 필드에서 `data` 안으로 이동했습니다. HTTP 상태 코드와 API 경로는 동일합니다.
+모든 API는 `code`, `message`, `data`, `details` 형식을 사용합니다. 성공 결과는 `data`에 담습니다.
 
 ```json
 {
@@ -128,6 +172,9 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | --- | --- | --- |
 | `STUDY_APP_NAME` | `Study API` | Swagger에 표시할 앱 이름 |
 | `STUDY_DATABASE_PATH` | `study.db` | SQLite 파일 경로 |
+| `STUDY_SESSION_MAX_AGE_SECONDS` | `86400` | 로그인 세션과 쿠키의 최대 유지 시간(1일) |
+| `STUDY_SESSION_IDLE_SECONDS` | `1800` | 인증 요청이 없는 세션의 만료 시간(30분). 최대 유지 시간 이내로 설정 |
+| `STUDY_SESSION_COOKIE_SECURE` | `false` | 백엔드에 HTTP로 전달하는 HTTPS 프록시 환경에서 `true`로 설정. HTTPS 요청에는 자동 적용 |
 | `STUDY_WEATHER_TIMEOUT_SECONDS` | `10` | 외부 날씨 API 제한 시간(0.1~30초) |
 | `STUDY_WEATHER_CACHE_TTL_SECONDS` | `600` | 날씨 캐시 유지 시간(0~3600초, 0은 캐시 해제) |
 | `STUDY_LLM_BASE_URL` | `http://127.0.0.1:11434` | Ollama 서버의 기본 주소 |
@@ -154,7 +201,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 
 설정 우선순위는 프로젝트 루트의 `.env` → 환경변수 → 코드 기본값입니다. `.env`에 작성한 값은 같은 이름의 환경변수보다 우선합니다. 파일 수정 후 서버를 재시작하면 반영됩니다. VS Code의 `python.terminal.useEnvFile`은 `false`로 두어도 코드가 직접 `.env`를 읽습니다. 상대 DB 경로는 프로젝트 루트 기준입니다. 서버 시작 시 테이블이 없으면 생성하고, 사용자 데이터는 DB 파일에 저장합니다. DB 파일과 `.env`는 Git에서 제외합니다.
 
-현재 추가 패키지 다운로드가 제한되어 Python 기본 `sqlite3` 드라이버를 사용합니다. `models.py`는 SQL 테이블 정의와 행 매핑을 담으며 SQLAlchemy ORM 모델은 아닙니다. ORM 도입 시 infrastructure의 모델·저장소·Unit of Work 및 common의 연결 설정을 교체하고 domain과 application의 계약을 유지할 수 있습니다. DB 테이블 구조 변경을 자동 반영하는 마이그레이션 도구는 아직 구성하지 않았습니다.
+DB 연결에는 Python 표준 라이브러리의 `sqlite3`를 사용합니다. `models.py`는 테이블 정의와 DB 행 매핑을 관리합니다. 기존 인증 테이블에 세션의 마지막 활동 시각 열이 없으면 서버 시작 시 추가합니다.
 
 ## 파일 역할
 
@@ -168,17 +215,20 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `backend/app/common/responses.py` | 모든 API의 공통 응답 형식 |
 | `backend/app/common/errors/` | 공통 오류 코드·응답 모델·예외 핸들러·Swagger 오류 문서 |
 | `backend/app/outfits/` | 날씨 기반 LLM 추천·Gemini 자동 전환·오늘/주간 조회·응답 검증 |
-| `backend/app/users/presentation/router.py` | HTTP 요청, Service 호출, 상태 코드·응답 반환 |
+| `backend/app/users/presentation/router.py` | 회원가입·로그인·로그아웃, 세션 쿠키와 계정·프로필 API |
+| `backend/app/weather/presentation/router.py` | 국내 지역 검색, 오늘·주간 날씨 API |
+| `backend/app/outfits/presentation/router.py` | 오늘·주간 옷차림 추천과 신고·수정안 검수 API |
 | `backend/app/users/presentation/schemas.py` | Pydantic 요청·응답 형식 |
-| `backend/app/users/application/services.py` | 사용자 등록·조회 절차와 트랜잭션 범위 |
+| `backend/app/users/application/services.py` | 사용자 등록·조회, 인증과 프로필 처리 |
 | `backend/app/users/application/dto.py` | HTTP와 독립된 기능 입력·결과 데이터 |
-| `backend/app/users/application/exceptions.py` | 사용자를 찾지 못한 경우의 예외 |
+| `backend/app/users/application/exceptions.py` | 사용자 조회와 인증 오류 |
 | `backend/app/users/application/unit_of_work.py` | 트랜잭션과 저장소에 접근하기 위한 추상 계약 |
 | `backend/app/users/domain/entities.py` | 사용자 객체, 이름·이메일 규칙 |
 | `backend/app/users/domain/repositories.py` | 사용자 저장·조회 인터페이스 |
 | `backend/app/users/domain/exceptions.py` | 잘못된 사용자 정보·이메일 중복 예외 |
 | `backend/app/users/infrastructure/models.py` | 사용자 테이블 SQL과 DB 행 매핑 |
 | `backend/app/users/infrastructure/repositories.py` | 파라미터 바인딩을 사용하는 실제 SQL 처리 |
+| `backend/app/users/infrastructure/security.py` | scrypt 비밀번호 해시 생성과 비교 |
 | `backend/app/users/infrastructure/unit_of_work.py` | 커밋, 롤백, 연결 종료 구현 |
 | `backend/app/users/bootstrap.py` | 실제 DB 구현체를 Service에 주입 |
 | `backend/tests/test_users.py` | 임시 SQLite DB를 사용하는 저장·중복·롤백 검증 |
@@ -186,17 +236,19 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 
 ## 요청 흐름과 의존성
 
+DDD 실습용 사용자 등록 요청은 다음 순서로 처리합니다.
+
 1. Router는 요청 스키마를 입력 DTO로 변환하고 Service를 호출합니다.
 2. Service는 Domain 객체를 만들어 업무 규칙을 검증합니다.
 3. Service는 Unit of Work를 열고 Repository 인터페이스로 조회·저장합니다.
 4. SQLite Repository가 실제 SQL을 실행합니다.
 5. Service가 커밋한 뒤 결과 DTO를 반환하고 Router가 응답 스키마로 변환합니다.
 
-Domain은 FastAPI·Pydantic·DB 구현을 import하지 않습니다. Application은 Repository·트랜잭션 계약에 의존하고, SQLite 구현은 bootstrap에서 연결합니다. Repository 내부에서는 커밋하지 않습니다. 예외가 발생하거나 커밋하지 않은 작업은 Unit of Work가 롤백하고 연결을 닫습니다.
+사용자 Domain은 업무 규칙을 정의합니다. Application은 Repository와 트랜잭션의 계약에 의존하고, SQLite 구현은 `bootstrap.py`에서 연결합니다. Unit of Work가 커밋과 롤백을 관리하고 연결을 닫습니다.
 
 ## API 예시
 
-Swagger에서 `POST /api/v1/users`를 실행합니다.
+Swagger에서 DDD 실습용 `POST /api/v1/users`를 실행합니다.
 
 ```json
 {
@@ -208,10 +260,10 @@ Swagger에서 `POST /api/v1/users`를 실행합니다.
 | 요청 | 정상 결과 | 주요 오류 |
 | --- | --- | --- |
 | `POST /api/v1/users` | `201`, 생성된 UUID·이름·이메일 | 이메일 중복 `409`, 잘못된 입력 `422` |
-| `GET /api/v1/users/{user_id}` | `200`, 사용자 정보 | 없는 사용자 `404`, 잘못된 UUID `422` |
+| `GET /api/v1/users/{user_id}` | `200`, 로그인한 본인의 사용자 정보 | 미인증·만료 `401`, 타인 조회 `403` |
 | `GET /health` | `200`, `data.status`가 `ok` | 앱 응답 여부 확인용 |
 
-생성 결과의 `data.id`를 조회 API에 입력합니다. 이름의 앞뒤 공백을 제거하고 이메일 전체를 소문자로 정규화합니다. 이메일은 기본 형식만 검증하며 실제 수신·소유 여부는 확인하지 않습니다. 사전 중복 조회와 DB UNIQUE 제약으로 중복 이메일을 방지합니다.
+이 요청은 이름 앞뒤의 공백을 제거하고 이메일을 소문자로 정규화한 뒤 사용자 레코드를 생성합니다. 로그인 가능한 계정은 비밀번호와 함께 `POST /api/v1/users/auth/register`로 등록합니다.
 
 ## 검증
 
@@ -220,10 +272,6 @@ Swagger에서 `POST /api/v1/users`를 실행합니다.
 ```
 
 테스트마다 임시 DB를 만들고 종료 시 정리하므로 실제 `study.db`에 테스트 데이터를 남기지 않습니다.
-
-## 오답 수정과 학습자료 수집
-
-추천 화면에서 로그인 후 답변을 신고·수정하고, **내 수정안 검수**에서 승인한 정답만 내보낼 수 있습니다. 원본 보존, 검수 기준과 운영 도구는 [FEEDBACK.md](FEEDBACK.md)를 참고하세요.
 
 ## 다음 업무 추가
 

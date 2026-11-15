@@ -55,15 +55,19 @@
 
 비밀번호는 10~128자이며 공백을 제거하거나 문자를 잘라 저장하지 않습니다. 표준 라이브러리 scrypt(`N=32768`, `r=8`, `p=3`, 32MiB)와 각 비밀번호의 무작위 소금을 사용합니다. 이 조합은 [OWASP의 scrypt 설정](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#scrypt)에 해당합니다. 비밀번호 원문은 DB에 저장하지 않습니다.
 
-세션은 무작위 토큰을 `HttpOnly`, `SameSite=Lax`, `/api/v1` 경로의 쿠키로 전달하고 서버에는 토큰의 SHA-256 해시만 저장합니다. 세션은 발급 후 7일에 만료하며 로그인할 때 현재 브라우저의 이전 세션을 교체하고 로그아웃할 때 서버 기록도 제거합니다. 프론트는 토큰이나 비밀번호를 브라우저 저장소에 기록하지 않습니다. 변경 요청의 전용 헤더는 [OWASP의 AJAX API CSRF 방어 방식](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#employing-custom-request-headers-for-ajaxapi)을 사용합니다.
+세션은 무작위 토큰을 `HttpOnly`, `SameSite=Lax`, `/api/v1` 경로의 쿠키로 전달하고 서버에는 토큰의 SHA-256 해시만 저장합니다. 로그인할 때 현재 브라우저가 보낸 이전 세션을 교체하고 로그아웃할 때 서버 기록도 제거합니다. 프론트는 토큰이나 비밀번호를 브라우저 저장소에 기록하지 않습니다. 변경 요청의 전용 헤더는 [OWASP의 AJAX API CSRF 방어 방식](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#employing-custom-request-headers-for-ajaxapi)을 사용합니다.
 
-로컬 HTTP 개발에서는 Secure 쿠키가 꺼져 있습니다. HTTPS 환경에서는 서버 `.env`에 `STUDY_SESSION_COOKIE_SECURE=true`를 설정합니다. 별도 출처를 허용하는 배포 구성을 추가할 때에는 현재의 출처·쿠키 정책도 함께 조정해야 합니다.
+서버는 마지막 인증 활동 후 30분 또는 발급 후 1일(24시간) 중 더 먼저 도달하는 시점에 세션을 만료시킵니다. 인증이 필요한 API만 마지막 활동을 갱신합니다. `STUDY_SESSION_IDLE_SECONDS`와 `STUDY_SESSION_MAX_AGE_SECONDS`로 두 시간을 초 단위로 설정합니다. 쿠키의 `Max-Age`와 서버의 고정 만료 시각은 발급 시 동일한 최대 유지 시간을 적용합니다. 서버에 남아 있는 만료 토큰은 `AUTH_SESSION_EXPIRED`(401)를 반환합니다. 브라우저가 쿠키를 이미 삭제한 경우 화면은 이전 로그인 여부만 기억한 표시값을 사용해서 재로그인을 안내합니다.
+
+HTTPS 요청에는 `Secure`가 자동으로 적용됩니다. 앱에 HTTP로 전달하는 HTTPS 프록시 뒤에서는 서버 `.env`에 `STUDY_SESSION_COOKIE_SECURE=true`를 설정합니다. 로컬 HTTP에서는 기본값이 꺼져 있습니다.
 
 인증 시도는 DB에 15분 단위로 기록하며 이메일별 10회, 접속 주소별 30회를 넘으면 `AUTH_RATE_LIMITED`(429)를 반환합니다. 버킷 키는 원문 이메일·주소 대신 해시를 저장합니다. 없는 계정과 비밀번호 오류는 같은 응답과 비밀번호 계산 비용을 사용합니다. 만료된 세션과 시도 제한 기록은 후속 인증 요청에서 정리합니다.
 
 ## DB 호환과 범위
 
 서버 시작 시 기존 `users`를 보존하고 `user_credentials`, `user_sessions`, `user_recommendation_profiles`, `auth_rate_limits`를 추가합니다. 기존 사용자 등록 예제 API(`POST /users`, 이름·이메일만 받음)는 로그인 비밀번호를 만들지 않습니다. 이전 예제 데이터에 임의 비밀번호를 붙이거나 이메일만으로 계정을 가져오는 기능은 제공하지 않습니다. 새 계정은 회원가입 API로 등록합니다.
+
+이전 세션의 마지막 활동은 기록되어 있지 않아 기존 만료 시각에서 7일을 뺀 발급 시각을 사용합니다. 새 미사용 시간 기준을 이미 넘긴 세션은 재로그인이 필요합니다. 기존 비밀번호 해시와 계정·프로필 데이터는 보존됩니다.
 
 이메일 소유 확인, 비밀번호 재설정, 소셜 로그인과 계정 삭제는 아직 제공하지 않습니다. 추천 프로필은 서버에 저장되므로 같은 계정으로 다시 로그인하면 복원됩니다. 프로필 등록만으로 전국 배치를 예약하거나 주간 추천을 즉시 생성하지 않습니다. 새 개인 조건의 주간 결과는 다음 야간 배치에서 준비합니다.
 

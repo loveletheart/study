@@ -21,6 +21,7 @@ class ErrorCode(str, Enum):
     USER_DUPLICATE_EMAIL = "USER_DUPLICATE_EMAIL"
     USER_NOT_FOUND = "USER_NOT_FOUND"
     AUTH_REQUIRED = "AUTH_REQUIRED"
+    AUTH_SESSION_EXPIRED = "AUTH_SESSION_EXPIRED"
     AUTH_INVALID_CREDENTIALS = "AUTH_INVALID_CREDENTIALS"
     AUTH_FORBIDDEN = "AUTH_FORBIDDEN"
     AUTH_RATE_LIMITED = "AUTH_RATE_LIMITED"
@@ -72,6 +73,7 @@ ERROR_SPECS: Mapping[ErrorCode, ErrorSpec] = MappingProxyType({
     ErrorCode.USER_DUPLICATE_EMAIL: ErrorSpec(409, "이미 등록된 이메일입니다."),
     ErrorCode.USER_NOT_FOUND: ErrorSpec(404, "사용자를 찾을 수 없습니다."),
     ErrorCode.AUTH_REQUIRED: ErrorSpec(401, "로그인이 필요합니다. 다시 로그인해 주세요."),
+    ErrorCode.AUTH_SESSION_EXPIRED: ErrorSpec(401, "세션이 만료되었습니다. 다시 로그인해 주세요."),
     ErrorCode.AUTH_INVALID_CREDENTIALS: ErrorSpec(401, "이메일 또는 비밀번호를 확인해 주세요."),
     ErrorCode.AUTH_FORBIDDEN: ErrorSpec(403, "이 요청을 처리할 권한이 없습니다."),
     ErrorCode.AUTH_RATE_LIMITED: ErrorSpec(429, "로그인 시도가 많습니다. 15분 후 다시 시도해 주세요."),

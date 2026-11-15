@@ -2,7 +2,6 @@
 
 # 표준 라이브러리
 import sqlite3
-from contextlib import closing
 from pathlib import Path
 
 # 프로젝트 모듈
@@ -21,14 +20,13 @@ def connect_database(database_path: Path | None = None) -> sqlite3.Connection:
 def initialize_database(database_path: Path | None = None) -> None:
     """테이블이 없으면 생성"""
     # 업무별 테이블 정의는 해당 업무의 infrastructure에서 관리한다.
-    """테이블이 없으면 생성"""
-    from app.users.infrastructure.models import CREATE_USERS_TABLE, AUTH_TABLES
+    from app.users.infrastructure.models import CREATE_USERS_TABLE, initialize_auth_tables
 
     connection = connect_database(database_path)
     try:
         with connection:
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute(CREATE_USERS_TABLE)
-            for statement in AUTH_TABLES:
-                connection.execute(statement)
+            initialize_auth_tables(connection)
     finally:
         connection.close()

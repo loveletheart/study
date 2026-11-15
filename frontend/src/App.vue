@@ -52,6 +52,8 @@ const {
   ready: accountReady,
   busy: accountBusy,
   error: accountError,
+  sessionExpired,
+  expireSession,
   signIn,
   saveProfile,
   signOut,
@@ -105,7 +107,12 @@ watch(
   ([ready]) => {
     if (!ready) return
     adoptAccount(account.value)
-    if ((view.value === 'profile' || view.value === 'review') && !account.value) navigate('login')
+    if (
+      !sessionExpired.value &&
+      (view.value === 'profile' || view.value === 'review') &&
+      !account.value
+    )
+      navigate('login')
   },
   { immediate: true },
 )
@@ -143,6 +150,13 @@ const preferencesOpen = ref(false)
 const regionTrigger = ref<HTMLButtonElement>()
 const preferenceTrigger = ref<HTMLButtonElement>()
 const selectedDay = ref(kstDate())
+watch(sessionExpired, (expired) => {
+  if (!expired) return
+  regionOpen.value = false
+  preferencesOpen.value = false
+  navigate('login')
+  accountError.value = '세션이 만료되었어요. 다시 로그인해 주세요.'
+})
 // 최신 날씨 조회만 실패한 경우에도 저장된 추천의 날짜는 계속 선택할 수 있다.
 const weeklyDays = computed<WeatherDay[]>(
   () =>
@@ -203,13 +217,6 @@ async function closeFeedback(saved = false) {
   if (saved) notification.value = '신고를 저장했어요. 내 수정안 검수에서 확인해 주세요.'
   await nextTick()
   feedbackTrigger.value?.focus()
-}
-function feedbackExpired() {
-  feedbackTarget.value = null
-  feedbackSession.value++
-  account.value = null
-  navigate('login')
-  accountError.value = '세션이 만료되었어요. 다시 로그인해 주세요.'
 }
 const dayWeather = computed(() =>
   period.value === 'today'
@@ -289,7 +296,7 @@ async function choosePreferences(value: Preferences) {
     :key="`${account.user.id}:${feedbackSession}`"
     @close="navigate('home')"
     @logout="logout"
-    @expired="feedbackExpired"
+    @expired="expireSession"
   />
   <p v-else-if="view === 'review' && !accountReady" role="status">로그인 확인 중</p>
   <AuthPage
@@ -837,7 +844,7 @@ async function choosePreferences(value: Preferences) {
       :day="feedbackTarget.day"
       @close="closeFeedback()"
       @saved="closeFeedback(true)"
-      @expired="feedbackExpired"
+      @expired="expireSession"
     />
     <PreferenceDialog
       v-if="preferencesOpen"
