@@ -15,9 +15,9 @@ from pydantic import TypeAdapter
 from app.common.config import Settings
 from app.outfits.application.exceptions import OutfitLlmResponseError
 from app.outfits.bootstrap import get_cached_outfit_service, get_personalized_outfit_cache
-from app.outfits.domain.models import OutfitLook, OutfitType
+from app.outfits.domain.models import ClothingPreference, OutfitLook, OutfitPreferences, OutfitType
 from app.outfits.domain.rules import build_weekly_wardrobe
-from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender, OllamaOutfitRecommender
+from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender, OllamaOutfitRecommender, PersonalizationChatClient
 from app.outfits.infrastructure.schemas import GeneratedLook
 from app.outfits.infrastructure.prompts import LOOK_EXAMPLES
 from app.outfits.presentation.schemas import TodayOutfitResponse
@@ -75,6 +75,52 @@ class OutfitContractTests(unittest.TestCase):
         self.client.chat.return_value = json.dumps(payload)
         with self.assertRaises(OutfitLlmResponseError):
             self.recommender.recommend((self.day,))
+
+    def test_menswear_repairs_dresses_in_either_look_without_rejecting_shared_one_piece(self):
+        preferences = OutfitPreferences(clothing_preference=ClothingPreference.MENSWEAR)
+        recommender = OllamaOutfitRecommender(
+            PersonalizationChatClient(self.client, preferences), "test-model", repair_attempts=1,
+        )
+        for slot in ("best", "worst"):
+            with self.subTest(slot=slot):
+                self.client.reset_mock()
+                wrong, corrected = self.payload(), self.payload()
+                wrong["days"][0][slot] = dress()
+                corrected["days"][0]["best"] = dress("작업용 점프수트")
+                corrected["days"][0]["worst"]["top"] = "얇은 드레스 셔츠"
+                corrected["days"][0]["worst"]["shoes"] = "드레스 슈즈"
+                self.client.chat.side_effect = [json.dumps(wrong), json.dumps(corrected)]
+
+                look = recommender.recommend((self.day,)).recommendations[0].best
+
+                self.assertEqual(look.one_piece, "작업용 점프수트")
+                first, second = [json.loads(call.args[1][1]["content"]) for call in self.client.chat.call_args_list]
+                self.assertTrue(first["look_examples"])
+                self.assertNotIn("면 원피스", json.dumps(first["look_examples"], ensure_ascii=False))
+                self.assertIn(slot, second["answer_checks"][0])
+                self.assertIn("면 원피스", second["answer_checks"][0])
+
+    def test_personalized_outfits_reject_explicit_opposite_style_and_keep_shared_items(self):
+        for style, conflicting_names in (
+            (ClothingPreference.WOMENSWEAR, ("남성 린넨 재킷", "남성 전용 재킷", "Men\u2019s jacket")),
+            (ClothingPreference.MENSWEAR, ("여성 린넨 재킷", "여성 전용 재킷", "Women's jacket")),
+        ):
+            preferences = OutfitPreferences(clothing_preference=style)
+            recommender = OllamaOutfitRecommender(
+                PersonalizationChatClient(self.client, preferences), "test-model",
+            )
+            payload = self.payload()
+            look = payload["days"][0]["best"]
+            for name in conflicting_names:
+                with self.subTest(preference=style, item=name):
+                    look["outerwear"] = name
+                    self.client.chat.return_value = json.dumps(payload)
+                    with self.assertRaises(OutfitLlmResponseError):
+                        recommender.recommend((self.day,))
+
+            look["outerwear"] = "공용 재킷"
+            self.client.chat.return_value = json.dumps(payload)
+            self.assertEqual(recommender.recommend((self.day,)).recommendations[0].best.outerwear, "공용 재킷")
 
     def test_outfit_type_and_parts_must_agree(self):
         for look in (dress() | {"top": "셔츠"}, dress() | {"bottom": "바지"}, dress() | {"one_piece": None},

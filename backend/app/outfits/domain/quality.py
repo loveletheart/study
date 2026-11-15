@@ -1,6 +1,8 @@
 import re
 from dataclasses import dataclass
 
+from app.outfits.domain.clothing_style import conflicting_clothes
+
 
 @dataclass(frozen=True)
 class QualityIssue:
@@ -20,8 +22,14 @@ def training_text_issues(value) -> list[QualityIssue]:
 
 def check_day(day: dict, weather: dict, preferences: dict | None = None) -> dict:
     errors, warnings = training_text_issues(day), []
+    clothing_preference = (preferences or {}).get('clothing_preference')
     for label in ('best', 'worst'):
         outfit = day[label]
+        if conflicts := conflicting_clothes(outfit, clothing_preference):
+            errors.append(QualityIssue(
+                'clothing_preference',
+                f"{label} 조합에서 선택한 의류 유형과 맞지 않는 품목({', '.join(conflicts)})을 빼고 계절에 맞는 대안으로 바꿔 주세요.",
+            ))
         if re.search('장갑|우산|목도리|선글라스', outfit.get('shoes') or ''):
             errors.append(QualityIssue('clothing_category', f'{label}의 신발에는 신발만 넣어 주세요.'))
         if re.search('장갑|우산|목도리|선글라스', outfit.get('outerwear') or ''):

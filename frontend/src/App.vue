@@ -27,6 +27,7 @@ import type { GeneratedDay, Location, Preferences, ProfileInput, WeatherDay } fr
 
 const {
   location,
+  usingDefaultLocation,
   preferences,
   period,
   weather,
@@ -39,6 +40,7 @@ const {
   storageNotice,
   isPersonalized,
   selectLocation,
+  loadDefaultLocation,
   selectPeriod,
   applyPreferences,
   loadWeather,
@@ -107,6 +109,16 @@ watch(
   },
   { immediate: true },
 )
+watch(
+  [accountReady, view, account],
+  ([ready, currentView], _, onCleanup) => {
+    if (!ready || currentView !== 'home') return
+    const controller = new AbortController()
+    onCleanup(() => controller.abort())
+    void loadDefaultLocation(controller.signal)
+  },
+  { immediate: true },
+)
 async function submitAuth(values: { email: string; password: string; name?: string }) {
   const mode = view.value === 'register' ? 'register' : 'login'
   if (await signIn(mode, values)) navigate(account.value?.profile.location ? 'home' : 'profile')
@@ -131,7 +143,6 @@ const preferencesOpen = ref(false)
 const regionTrigger = ref<HTMLButtonElement>()
 const preferenceTrigger = ref<HTMLButtonElement>()
 const selectedDay = ref(kstDate())
-const avoidOpen = ref(false)
 // 최신 날씨 조회만 실패한 경우에도 저장된 추천의 날짜는 계속 선택할 수 있다.
 const weeklyDays = computed<WeatherDay[]>(
   () =>
@@ -150,11 +161,7 @@ watch(weeklyDays, (days) => {
     selectedDay.value = days[0]!.date
 })
 watch(period, () => {
-  avoidOpen.value = false
   selectedDay.value = kstDate()
-})
-watch(location, () => {
-  avoidOpen.value = false
 })
 const recommendation = computed(() =>
   period.value === 'today'
@@ -266,18 +273,13 @@ async function choosePreferences(value: Preferences) {
     if (
       !(await saveProfile({
         name: account.value.user.name,
-        location_id: location.value?.id || null,
+        location_id: account.value.profile.location?.id ?? null,
         preferences: value,
       }))
     )
       return
   } else applyPreferences(value)
   await closePreferences()
-}
-
-function chooseDay(date: string) {
-  selectedDay.value = date
-  avoidOpen.value = false
 }
 </script>
 
@@ -353,7 +355,9 @@ function chooseDay(date: string) {
             </button>
             <button ref="regionTrigger" class="location-button" @click="regionOpen = true">
               <AppIcon name="pin" :size="17" /><span>{{
-                location ? location.name : '내 지역 선택'
+                usingDefaultLocation && location
+                  ? locationLabel(location)
+                  : (location?.name ?? '내 지역 선택')
               }}</span
               ><AppIcon name="chevron" :size="14" /></button
             ><button v-if="account" class="account-button" @click="navigate('profile')">
@@ -427,7 +431,9 @@ function chooseDay(date: string) {
               </button>
             </div>
             <span class="toolbar-caption">{{
-              location ? locationLabel(location) : '우리 동네에서 시작하는 하루'
+              location
+                ? `${usingDefaultLocation ? '기본 지역 · ' : ''}${locationLabel(location)}`
+                : '우리 동네에서 시작하는 하루'
             }}</span>
           </div>
 
@@ -487,7 +493,7 @@ function chooseDay(date: string) {
                   class="day-button"
                   :class="{ selected: selectedDay === day.date }"
                   :aria-pressed="selectedDay === day.date"
-                  @click="chooseDay(day.date)"
+                  @click="selectedDay = day.date"
                 >
                   <span>{{
                     day.date === kstDate()
@@ -706,7 +712,26 @@ function chooseDay(date: string) {
                     <AppIcon name="clock" :size="16" />{{ dateLabel(outfit!.forecast_start_date!) }}
                     예보 기준 추천이에요. 왼쪽 날씨는 최신 조회 결과예요.
                   </p>
-                  <OutfitCard :look="recommendation.best" :reasons="recommendation.reasons" />
+                  <div :key="recommendation.date" class="outfit-comparison">
+                    <OutfitCard
+                      :look="recommendation.best"
+                      :reasons="recommendation.reasons"
+                      :comparison-look="recommendation.worst"
+                    />
+                    <OutfitCard
+                      :look="recommendation.worst"
+                      :reasons="recommendation.avoid_reasons"
+                      :comparison-look="recommendation.best"
+                      avoid
+                    />
+                  </div>
+                  <div v-if="recommendation.precautions.length" class="precaution-note">
+                    <AppIcon name="leaf" :size="20" />
+                    <div>
+                      <strong>외출 전, 이것도 챙겨요</strong>
+                      <p v-for="note in recommendation.precautions" :key="note">{{ note }}</p>
+                    </div>
+                  </div>
                   <div class="feedback-entry">
                     <button
                       ref="feedbackTrigger"
@@ -723,29 +748,6 @@ function chooseDay(date: string) {
                       로그인 후 이 답변의 문제를 신고하거나 수정할 수 있어요.
                     </p>
                   </div>
-                  <div v-if="recommendation.precautions.length" class="precaution-note">
-                    <AppIcon name="leaf" :size="20" />
-                    <div>
-                      <strong>외출 전, 이것도 챙겨요</strong>
-                      <p v-for="note in recommendation.precautions" :key="note">{{ note }}</p>
-                    </div>
-                  </div>
-                  <button
-                    class="avoid-toggle"
-                    :aria-expanded="avoidOpen"
-                    aria-controls="avoid-look"
-                    @click="avoidOpen = !avoidOpen"
-                  >
-                    <span><AppIcon name="info" :size="17" />이런 옷차림은 피하는 게 좋아요</span
-                    ><AppIcon :name="avoidOpen ? 'close' : 'chevron'" :size="16" />
-                  </button>
-                  <OutfitCard
-                    v-if="avoidOpen"
-                    id="avoid-look"
-                    :look="recommendation.worst"
-                    :reasons="recommendation.avoid_reasons"
-                    avoid
-                  />
                   <div
                     v-if="outfit?.personalization.adjustments.length"
                     class="personalization-notes"

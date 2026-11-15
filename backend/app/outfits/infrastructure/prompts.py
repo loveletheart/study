@@ -12,7 +12,7 @@ from app.outfits.domain.rules import temperature_reference
 
 # 프롬프트 버전
 PROMPT_VERSION = "2.2"
-PERSONALIZATION_VERSION = "2.5"
+PERSONALIZATION_VERSION = "2.6"
 
 
 # 기본 추천 프롬프트
@@ -92,8 +92,20 @@ def _personal_requirements(preferences: OutfitPreferences) -> dict[str, str]:
     }
     if preferences.clothing_preference != ClothingPreference.ANY:
         requirements["선호_의류"] = {
-            ClothingPreference.MENSWEAR: "남성복 위주의 의류와 실루엣을 선호합니다. 성별 정체성이나 신체 치수는 추정하지 마세요.",
-            ClothingPreference.WOMENSWEAR: "여성복 위주의 의류와 실루엣을 선호합니다. 원피스나 치마를 반드시 선택할 필요는 없으며 신체 치수는 추정하지 마세요.",
+            ClothingPreference.MENSWEAR: (
+                "남성복 스타일을 선택했습니다. best와 worst 모두 남성복 스타일 또는 공용 의류로 구성하세요. "
+                "원피스·치마·드레스·하이힐 같은 여성복 스타일은 두 조합에서 제외하세요. "
+                "공용 티셔츠·니트·바지·운동화와 작업용 점프수트는 사용할 수 있습니다. "
+                "worst는 같은 의류 취향 안에서 날씨나 활동에 맞지 않는 조합을 고르세요. "
+                "성별 정체성이나 신체 치수는 추정하지 마세요."
+            ),
+            ClothingPreference.WOMENSWEAR: (
+                "여성복 스타일을 선택했습니다. best와 worst 모두 여성복 스타일 또는 공용 의류로 구성하세요. "
+                "남성 전용으로 표시된 품목은 두 조합에서 제외하세요. "
+                "공용 티셔츠·니트·바지·운동화도 쓸 수 있으며 원피스나 치마는 필수가 아닙니다. "
+                "worst는 같은 의류 취향 안에서 날씨나 활동에 맞지 않는 조합을 고르세요. "
+                "성별 정체성이나 신체 치수는 추정하지 마세요."
+            ),
         }[preferences.clothing_preference]
     if preferences.avoid_items:
         names = {AvoidItem.SKIRTS: "치마", AvoidItem.DRESSES: "원피스", AvoidItem.SHORTS: "반바지", AvoidItem.SANDALS: "샌들", AvoidItem.HEELS: "굽 높은 신발", AvoidItem.SLEEVELESS: "민소매"}

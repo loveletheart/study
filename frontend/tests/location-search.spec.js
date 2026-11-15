@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { mockApi, success, failure, location } from './fixtures.js'
+import { mockApi, success, failure, location, seed } from './fixtures.js'
 
 test('포함 검색의 전체 건수와 다음 페이지를 표시하고 기존 결과를 유지한다', async ({ page }) => {
   await mockApi(page)
+  await seed(page)
   const calls = []
   const rows = Array.from({ length: 23 }, (_, i) => ({ ...location, id: 200000 + i, name: i === 0 ? '남서울동' : `서울 ${i}동` }))
   let failOnce = true
@@ -17,7 +18,7 @@ test('포함 검색의 전체 건수와 다음 페이지를 표시하고 기존 
     return route.fulfill({ json: success({ locations: rows.slice(offset, offset + 20), total: rows.length, offset, limit: 20, has_more: offset + 20 < rows.length, attribution: 'GeoNames' }) })
   })
   await page.goto('./')
-  await page.getByRole('button', { name: '내 지역 선택' }).click()
+  await page.getByRole('button', { name: '서울', exact: true }).click()
   await page.getByRole('searchbox', { name: '지역명' }).fill('서울')
   await expect(page.locator('.search-result-count')).toContainText('23개 지역 중 20개 표시')
   await expect(page.locator('.region-result')).toHaveCount(20)
@@ -34,6 +35,7 @@ test('포함 검색의 전체 건수와 다음 페이지를 표시하고 기존 
 
 test('검색어를 바꾸면 페이지를 초기화하고 이전의 늦은 결과를 섞지 않는다', async ({ page }) => {
   await mockApi(page)
+  await seed(page)
   let release
   const delayed = new Promise(resolve => { release = resolve })
   await page.route('**/weather/locations?**', async route => {
@@ -45,7 +47,7 @@ test('검색어를 바꾸면 페이지를 초기화하고 이전의 늦은 결�
     await route.fulfill({ json: success({ locations, total: query === '서울' ? 2 : 1, offset, limit: 20, has_more: query === '서울' && offset === 0, attribution: 'GeoNames' }) }).catch(() => {})
   })
   await page.goto('./')
-  await page.getByRole('button', { name: '내 지역 선택' }).click()
+  await page.getByRole('button', { name: '서울', exact: true }).click()
   await page.getByRole('searchbox', { name: '지역명' }).fill('서울')
   await page.getByRole('button', { name: '관련 지역 더 보기' }).click()
   await page.getByRole('searchbox', { name: '지역명' }).fill('서울 강남')

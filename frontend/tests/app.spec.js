@@ -5,6 +5,7 @@ import {
   success,
   failure,
   location,
+  defaultDistrict,
   outfit,
   weather,
   dayAt,
@@ -12,11 +13,30 @@ import {
   recommendation,
 } from './fixtures.js'
 
-test('첫 방문에는 데이터 생성 없이 지역 선택부터 안내한다', async ({ page }) => {
+test('첫 방문에는 서울특별시 중구의 날씨와 옷차림을 불러온다', async ({ page }) => {
   await mockApi(page)
+  const requestedWeather = page.waitForRequest('**/weather/today?**')
+  const requestedOutfit = page.waitForRequest(`**/outfits/regions/${defaultDistrict.id}/today?**`)
+  await page.goto('./')
+  const url = new URL((await requestedWeather).url())
+  expect(url.searchParams.get('latitude')).toBe(String(defaultDistrict.latitude))
+  expect(url.searchParams.get('longitude')).toBe(String(defaultDistrict.longitude))
+  await requestedOutfit
+  await expect(page.locator('.toolbar-caption')).toHaveText('기본 지역 · 서울특별시 중구')
+  await expect(page.getByRole('heading', { name: '베스트 옷차림' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '워스트 옷차림' })).toBeVisible()
+  expect(await page.evaluate(() => localStorage.getItem('ondo.settings.v1'))).toBeNull()
+})
+
+test('기본 지역 조회에 실패해도 지역을 직접 선택할 수 있다', async ({ page }) => {
+  await mockApi(page)
+  await page.route('**/weather/locations?**', (route) =>
+    route.fulfill({ status: 503, json: failure('WEATHER_UNAVAILABLE', '지역 검색 오류') }),
+  )
   const requests = []
   page.on('request', (req) => {
-    if (req.url().includes('/api/') && !req.url().includes('/users/me')) requests.push(req.url())
+    if (req.url().includes('/outfits/') || req.url().includes('/weather/today?'))
+      requests.push(req.url())
   })
   await page.goto('./')
   await expect(page.getByRole('heading', { name: /날씨를 알면/ })).toBeVisible()
@@ -30,15 +50,16 @@ test('첫 방문에는 데이터 생성 없이 지역 선택부터 안내한다'
 test('지역 검색·선택으로 실제 계약의 날씨와 추천을 함께 표시한다', async ({ page }) => {
   await mockApi(page)
   await page.goto('./')
-  await page.getByRole('button', { name: '내 지역 선택' }).click()
+  await page.getByRole('button', { name: '서울특별시 중구', exact: true }).click()
   await page.getByRole('searchbox', { name: '지역명' }).fill('서울')
   await page.getByRole('button', { name: /서울 서울특별시/ }).click()
   await expect(page.locator('.current-temperature')).toHaveText('17°')
-  await expect(page.getByText('부드러운 코튼 셔츠', { exact: true })).toBeVisible()
+  const best = page.locator('.outfit-comparison article').filter({ hasText: '베스트 옷차림' })
+  const worst = page.locator('.outfit-comparison article').filter({ hasText: '워스트 옷차림' })
+  await expect(best.getByText('부드러운 코튼 셔츠', { exact: true })).toBeVisible()
+  await expect(worst.getByText('얇은 반팔 티셔츠', { exact: true })).toBeVisible()
   await expect(page.locator('.weather-metrics')).toContainText('0%')
   await expect(page.locator('.weather-metrics')).toContainText('52%')
-  await page.getByRole('button', { name: '이런 옷차림은 피하는 게 좋아요' }).click()
-  await expect(page.getByText('얇은 반팔 티셔츠', { exact: true })).toBeVisible()
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('ondo.settings.v1')))
   expect(saved.location.id).toBe(location.id)
   await page.reload()
@@ -122,6 +143,7 @@ test('이전 배치의 주간 추천은 배열 순서가 아니라 날짜로 연
           ...day.best,
           top: i === 0 ? '어제의 셔츠' : i === 1 ? '오늘의 셔츠' : '다른 날의 셔츠',
         },
+        worst: { ...day.worst, top: i === 1 ? '오늘 피할 반팔' : '다른 날에 피할 반팔' },
       }
     }),
   }
@@ -131,8 +153,13 @@ test('이전 배치의 주간 추천은 배열 순서가 아니라 날짜로 연
   await page.goto('./')
   await page.getByRole('button', { name: '일주일', exact: true }).click()
   await expect(page.getByText('오늘의 셔츠', { exact: true })).toBeVisible()
+  await expect(page.getByText('오늘 피할 반팔', { exact: true })).toBeVisible()
   await expect(page.getByText('어제의 셔츠', { exact: true })).not.toBeVisible()
   await expect(page.locator('.inline-notice')).toContainText('예보 기준 추천')
+  await page.locator('.day-button').nth(1).click()
+  await expect(page.getByText('다른 날의 셔츠', { exact: true })).toBeVisible()
+  await expect(page.getByText('다른 날에 피할 반팔', { exact: true })).toBeVisible()
+  await expect(page.getByText('오늘 피할 반팔', { exact: true })).toHaveCount(0)
   await page.locator('.day-button').last().click()
   await expect(page.getByRole('heading', { name: '선택한 날짜의 추천이 없어요.' })).toBeVisible()
 })
@@ -140,6 +167,25 @@ test('이전 배치의 주간 추천은 배열 순서가 아니라 날짜로 연
 test('개인 취향은 적용할 때 한 번만 요청에 전달하고 날씨는 재조회하지 않는다', async ({ page }) => {
   await seed(page)
   await mockApi(page)
+  await page.route('**/outfits/regions/**/today?**', (route) => {
+    const url = new URL(route.request().url())
+    const personalized = url.searchParams.get('style') === 'formal'
+    const day = outfit.recommendation
+    return route.fulfill({
+      json: success(
+        personalized
+          ? {
+              ...outfit,
+              recommendation: {
+                ...day,
+                best: { ...day.best, top: '단정한 옥스퍼드 셔츠' },
+                worst: { ...day.worst, top: '피할 민소매 티셔츠' },
+              },
+            }
+          : outfit,
+      ),
+    })
+  })
   const calls = []
   page.on('request', (req) => {
     if (req.url().includes('/api/')) calls.push(req.url())
@@ -153,6 +199,10 @@ test('개인 취향은 적용할 때 한 번만 요청에 전달하고 날씨는
   await page.getByRole('button', { name: '내 취향 반영하기' }).click()
   await expect(page.getByRole('dialog')).not.toBeVisible()
   await expect(page.locator('.small-label')).toContainText('취향을 더한 추천')
+  await expect(page.getByText('단정한 옥스퍼드 셔츠', { exact: true })).toBeVisible()
+  await expect(page.getByText('피할 민소매 티셔츠', { exact: true })).toBeVisible()
+  await expect(page.getByText('부드러운 코튼 셔츠', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('얇은 반팔 티셔츠', { exact: true })).toHaveCount(0)
   expect(calls.filter((url) => url.includes('/weather/'))).toHaveLength(1)
   expect(calls.filter((url) => url.includes('/outfits/'))).toHaveLength(2)
   const request = new URL(calls.filter((url) => url.includes('/outfits/')).at(-1))
@@ -206,7 +256,13 @@ test('원피스의 null 상하의와 누락된 날씨를 올바르게 표시한�
   )
   await page.goto('./')
   await expect(page.getByText('긴소매 코튼 원피스', { exact: true })).toBeVisible()
-  await expect(page.locator('.clothing-list dt')).toHaveText(['원피스', '신발', '준비물'])
+  const best = page.locator('.outfit-comparison article').filter({ hasText: '베스트 옷차림' })
+  const worst = page.locator('.outfit-comparison article').filter({ hasText: '워스트 옷차림' })
+  const clothingLabels = ['상의', '하의', '원피스', '신발', '준비물']
+  await expect(best.locator('.clothing-list dt')).toHaveText(clothingLabels)
+  await expect(worst.locator('.clothing-list dt')).toHaveText(clothingLabels)
+  await expect(best.locator('.clothing-list dd').first()).toHaveText('없음')
+  await expect(worst.locator('.clothing-list dd').nth(2)).toHaveText('없음')
   await expect(page.locator('.weather-metrics')).not.toContainText('null')
   await expect(page.locator('.weather-metrics')).toContainText('정보 없음')
   await expect(page.locator('.feels-like')).toHaveText('체감 —')
@@ -215,7 +271,7 @@ test('원피스의 null 상하의와 누락된 날씨를 올바르게 표시한�
 test('검색 결과가 없거나 조회에 실패하면 다시 검색할 수 있다', async ({ page }) => {
   await mockApi(page)
   await page.goto('./')
-  await page.getByRole('button', { name: '내 지역 선택' }).click()
+  await page.getByRole('button', { name: '서울특별시 중구', exact: true }).click()
   await page.getByRole('searchbox', { name: '지역명' }).fill('없는동네')
   await expect(page.getByText('검색 결과가 없어요.', { exact: false })).toBeVisible()
   await page.route('**/weather/locations?**', (route) =>
@@ -228,10 +284,11 @@ test('검색 결과가 없거나 조회에 실패하면 다시 검색할 수 있
   await expect(page.getByRole('button', { name: '다시 검색' })).toBeVisible()
 })
 
-test('손상된 저장값이 있어도 첫 화면을 사용할 수 있다', async ({ page }) => {
+test('손상된 저장값이 있어도 기본 지역을 불러온다', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('ondo.settings.v1', '{broken-json'))
+  await mockApi(page)
   await page.goto('./')
-  await expect(page.getByRole('button', { name: '우리 동네 찾아보기' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '서울특별시 중구', exact: true })).toBeVisible()
 })
 
 test('지역을 바꾸면 이전 지역의 늦은 응답이 현재 추천을 덮어쓰지 않는다', async ({ page }) => {
@@ -270,15 +327,46 @@ test('화면 넘침과 브라우저 오류 없이 데스크톱·모바일에서 
   const errors = []
   page.on('pageerror', (error) => errors.push(error.message))
   await seed(page)
-  await mockApi(page)
+  const longReason = '바람이 강한 시간에는 체감온도가 크게 낮아질 수 있어요. '.repeat(4).trim()
+  await mockApi(page, {
+    outfitData: {
+      ...outfit,
+      recommendation: {
+        ...outfit.recommendation,
+        avoid_reasons: [longReason],
+      },
+    },
+  })
   await page.goto('./')
   await expect(page.getByText('부드러운 코튼 셔츠', { exact: true })).toBeVisible()
+  const cards = page.locator('.outfit-comparison article')
+  await expect(cards).toHaveCount(2)
+  const best = await cards.nth(0).boundingBox()
+  const worst = await cards.nth(1).boundingBox()
+  if (testInfo.project.name === 'desktop') {
+    expect(worst.x).toBeGreaterThan(best.x + best.width)
+    expect(worst.y).toBe(best.y)
+  } else {
+    expect(worst.x).toBe(best.x)
+    expect(worst.y).toBeGreaterThan(best.y + best.height)
+  }
+  const reasonToggle = page.getByLabel('워스트 옷차림 이유 자세히 보기')
+  const preview = cards.nth(1).locator('.outfit-reasons > p')
+  await expect(preview).toContainText(/^바람이 강한 시간.*…$/)
+  await expect(page.getByText(longReason, { exact: true })).not.toBeVisible()
+  await reasonToggle.focus()
+  await expect(reasonToggle).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.getByText(longReason, { exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
+  await page.keyboard.press('Space')
+  await expect(page.getByText(longReason, { exact: true })).not.toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('today.png'), fullPage: true })
   await page.getByRole('button', { name: '일주일', exact: true }).click()
   await expect(page.locator('.day-button')).toHaveCount(7)
+  await expect(cards.nth(1)).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )

@@ -529,6 +529,10 @@ main {
   gap: 26px;
   align-items: start;
 }
+.recommendation-panel {
+  min-width: 0;
+  container-type: inline-size;
+}
 .weather-panel {
   padding: 23px 25px;
   overflow: hidden;
@@ -732,26 +736,15 @@ main {
 .outfit-card-heading {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 17px 20px 0;
-  gap: 8px;
-}
-.look-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: #537046;
-  font-size: 10px;
-  font-weight: 550;
-}
-.outfit-card-heading .micro {
-  font-size: 7px;
-  letter-spacing: 0.09em;
-  color: #9ca68c;
+  gap: 7px;
+  color: #3f674c;
+  font-size: 15px;
+  font-weight: 650;
 }
 .outfit-card-body {
   display: grid;
-  grid-template-columns: 0.95fr 1fr;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1fr);
   gap: 15px;
   align-items: center;
   padding: 15px 22px 17px;
@@ -790,6 +783,7 @@ main {
   width: 29px;
 }
 .clothing-list dd {
+  min-width: 0;
   font-size: 11px;
   margin: 0;
   font-weight: 500;
@@ -812,9 +806,28 @@ main {
   font-size: 11px;
   color: #67765d;
   line-height: 1.9;
+  overflow-wrap: anywhere;
 }
 .outfit-reasons p + p {
   margin-top: 5px;
+}
+.outfit-reason-details {
+  margin-top: 8px;
+}
+.outfit-reason-details > summary {
+  width: fit-content;
+  padding: 4px 0;
+  cursor: pointer;
+  color: #3f674c;
+  font-size: 12px;
+  font-weight: 600;
+}
+.outfit-reason-details > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.outfit-reason-details[open] > summary {
+  margin-bottom: 4px;
 }
 .precaution-note {
   background: #eef2e4;
@@ -839,31 +852,41 @@ main {
   color: #7b8869;
   line-height: 1.9;
 }
-.avoid-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 17px 2px;
-  font-size: 10px;
-  color: #879077;
-}
-.avoid-toggle > span {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-}
 .avoid-card {
   margin-bottom: 14px;
 }
-.avoid-card .look-tag {
-  color: #9b8967;
+.avoid-card .outfit-card-heading,
+.avoid-card .outfit-reason-details > summary {
+  color: #805637;
 }
 .avoid-card .outfit-reasons {
   background: #fbf9f4;
 }
 .avoid-card .reason-label {
-  color: #9b8b6c;
+  color: #805637;
+}
+.outfit-comparison {
+  display: grid;
+  gap: 12px;
+}
+.outfit-comparison .avoid-card {
+  margin-bottom: 0;
+}
+@container (min-width: 560px) {
+  .outfit-comparison {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .outfit-comparison .outfit-card {
+    display: grid;
+    grid-row: span 3;
+    grid-template-rows: subgrid;
+    row-gap: 0;
+  }
+  .outfit-comparison .outfit-card-body {
+    grid-template-columns: minmax(0, 0.55fr) minmax(0, 1fr);
+    align-items: start;
+    padding: 14px 16px;
+  }
 }
 .personalization-notes {
   background: white;
@@ -1543,9 +1566,6 @@ body:has(dialog[open]) {
   .heading-date {
     font-size: 10px;
   }
-  .outfit-card-heading .micro {
-    display: none;
-  }
   .weather-metrics {
     padding: 14px 2px;
   }
@@ -1693,12 +1713,7 @@ body:has(dialog[open]) {
   .small-label {
     display: inline-flex;
   }
-  .outfit-card-heading .micro {
-    display: inline;
-    font-size: 7px;
-  }
   .outfit-card-body {
-    grid-template-columns: 1fr 1fr;
     padding: 17px;
     gap: 18px;
   }
@@ -1725,10 +1740,6 @@ body:has(dialog[open]) {
   }
   .precaution-note strong {
     font-size: 11px;
-  }
-  .avoid-toggle {
-    font-size: 11px;
-    padding: 20px 2px;
   }
   .recommendation-timestamp {
     font-size: 9px;
@@ -1969,13 +1980,6 @@ body:has(dialog[open]) {
   font-size: 10px;
   color: #6f7f62;
 }
-.look-tag {
-  font-size: 12px;
-}
-.outfit-card-heading .micro {
-  font-size: 9px;
-  color: #71815f;
-}
 .clothing-list dt,
 .reason-label {
   font-size: 11px;
@@ -1993,7 +1997,6 @@ body:has(dialog[open]) {
 .small-label,
 .precaution-note strong,
 .precaution-note p,
-.avoid-toggle,
 .personalization-notes {
   font-size: 12px;
   color: #657b53;
@@ -2094,7 +2097,7 @@ body:has(dialog[open]) {
     font-size: 10px;
   }
   .outfit-card-body {
-    grid-template-columns: 0.9fr 1fr;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
   }
   .clothing-list dd,
   .outfit-reasons p {
@@ -2106,9 +2109,6 @@ body:has(dialog[open]) {
   .clothing-list dt {
     font-size: 10px;
     width: 30px;
-  }
-  .outfit-card-heading .micro {
-    font-size: 8px;
   }
   .small-label {
     font-size: 10px;
@@ -2128,7 +2128,7 @@ body:has(dialog[open]) {
 }
 @media (max-width: 390px) {
   .outfit-card-body {
-    grid-template-columns: 0.8fr 1fr;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
     padding: 14px;
     gap: 10px;
   }
