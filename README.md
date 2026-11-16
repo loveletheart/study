@@ -193,6 +193,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `STUDY_LLM_CLOUD_FALLBACK_ENABLED` | `false` | `true`일 때 로컬 실패 후 Gemini 한 번 호출 |
 | `STUDY_LLM_FALLBACK_LOCAL_TIMEOUT_SECONDS` | 20초 | 자동 전환을 켠 경우 로컬 요청당 적용. 지정값과 일반 로컬 대기 제한 중 작은 값 사용(1~600초) |
 | `STUDY_OUTFIT_REFRESH_SECONDS` | `3600` | 조회한 지역의 추천 갱신 간격(60~86400초). 서버 실행 중 동작 |
+| `STUDY_OUTFIT_WEATHER_REFRESH_WORKERS` | `4` | 시간별 시군구 예보 갱신의 최대 동시 요청 수(1~16) |
 | `STUDY_OUTFIT_CACHE_MAX_ENTRIES` | `4096` | 공통 추천 보관 조합 수(1~100000). 지역·오늘/주간·모델 설정 조합 기준 |
 | `STUDY_OUTFIT_WEEKLY_BATCH_HOUR` | `1` | 한국 시간 주간 배치 시작 시간대(0~23). 기본 01:00~02:00 사이 하루 한 번 시작 |
 | `STUDY_OUTFIT_WEEKLY_MAX_AGE_SECONDS` | `172800` | 주간 이전 정상 배치 결과의 최대 보관 시간(기본 48시간, 범위 1~7일) |
