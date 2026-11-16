@@ -13,6 +13,10 @@ class AuthenticationRequiredError(AppError):
     error_code = ErrorCode.AUTH_REQUIRED
 
 
+class SessionExpiredError(AuthenticationRequiredError):
+    error_code = ErrorCode.AUTH_SESSION_EXPIRED
+
+
 class InvalidCredentialsError(AppError):
     error_code = ErrorCode.AUTH_INVALID_CREDENTIALS
 

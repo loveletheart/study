@@ -44,7 +44,8 @@ def handle_app_error(request: Request, exc: Exception) -> JSONResponse:
     """업무 예외를 오류 응답으로 변환"""
     if not isinstance(exc, AppError):
         return handle_unexpected_error(request, exc)
-    return _error_response(exc.error_code, message=exc.message)
+    headers = {"Cache-Control": "no-store"} if ERROR_SPECS[exc.error_code].status_code == 401 else None
+    return _error_response(exc.error_code, message=exc.message, headers=headers)
 
 
 def handle_validation_error(request: Request, exc: Exception) -> JSONResponse:

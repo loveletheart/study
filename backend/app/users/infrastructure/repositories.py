@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import TypeAdapter
 from app.common.database import connect_database
 from app.users.application.dto import RecommendationProfile
-from app.users.application.exceptions import AuthenticationRateLimitError
+from app.users.application.exceptions import AuthenticationRateLimitError, SessionExpiredError
 
 # 프로젝트 모듈
 from app.users.domain.entities import User
@@ -74,12 +74,24 @@ class SQLiteAuthRepository:
         """만료 세션을 정리하고 현재 브라우저의 이전 세션은 교체한다."""
         with closing(connect_database(self._path)) as connection, connection:
             connection.execute("DELETE FROM user_sessions WHERE expires_at<=? OR token_hash=?", (now, previous_hash))
-            connection.execute("INSERT INTO user_sessions VALUES (?, ?, ?)", (token_hash, str(user_id), expires_at))
+            connection.execute(
+                "INSERT INTO user_sessions (token_hash, user_id, expires_at, last_active_at) VALUES (?, ?, ?, ?)",
+                (token_hash, str(user_id), expires_at, now),
+            )
 
-    def session_user(self, token_hash: str, now: float) -> User | None:
-        with closing(connect_database(self._path)) as connection:
-            row = connection.execute("SELECT u.id, u.name, u.email FROM user_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?", (token_hash, now)).fetchone()
-        return user_from_row(row) if row else None
+    def session_user(self, token_hash: str, now: float, idle_seconds: int) -> User | None:
+        """두 만료 조건을 검사하고 유효한 세션의 활동 시각만 갱신한다."""
+        with closing(connect_database(self._path)) as connection, connection:
+            sessions = connection.execute(
+                "UPDATE user_sessions SET last_active_at=MAX(last_active_at, ?) "
+                "WHERE token_hash=? AND expires_at>? AND last_active_at>? RETURNING user_id",
+                (now, token_hash, now, now - idle_seconds),
+            ).fetchall()
+            if sessions:
+                return SQLiteUserRepository(connection).find_by_id(UUID(sessions[0]["user_id"]))
+            if connection.execute("SELECT 1 FROM user_sessions WHERE token_hash=?", (token_hash,)).fetchone():
+                raise SessionExpiredError()
+        return None
 
     def delete_session(self, token_hash: str) -> None:
         with closing(connect_database(self._path)) as connection, connection:

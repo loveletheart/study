@@ -5,11 +5,12 @@ from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from app.common.config import Settings
 from app.common.database import initialize_database, connect_database
 from app.users.application.services import AuthService, UserService
 from app.users.application.dto import CreateUserCommand
@@ -22,6 +23,7 @@ from app.weather.infrastructure.location_catalog import SQLiteLocationCatalog
 from app.outfits.domain.models import OutfitPreferences, ClothingPreference, AvoidItem
 from app.outfits.infrastructure.prompts import _personal_requirements
 from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache
+from app.outfits.presentation.router import get_feedback_store
 from main import app
 
 
@@ -62,20 +64,26 @@ class AuthenticationTests(unittest.TestCase):
         self.assertIn("HttpOnly", response.headers["set-cookie"])
         self.assertIn("SameSite=lax", response.headers["set-cookie"])
         self.assertIn("Path=/api/v1", response.headers["set-cookie"])
+        self.assertIn("Max-Age=86400", response.headers["set-cookie"])
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertEqual(self.client.get("/api/v1/users/me").status_code, 200)
         self.assertNotIn("password", response.text)
         self.assertNotIn("token", response.text)
 
-    def test_password_and_session_tokens_are_not_stored_in_plain_text(self):
-        self.signup()
-        token = self.client.cookies.get("ondo_session")
+    def test_password_and_session_tokens_are_not_stored_or_logged_in_plain_text(self):
+        with self.assertLogs(level="INFO") as captured:
+            self.signup()
+            token = self.client.cookies.get("ondo_session")
+            self.assertEqual(self.client.get("/api/v1/users/me").status_code, 200)
         with closing(connect_database(self.path)) as connection:
             password_hash = connection.execute("SELECT password_hash FROM user_credentials").fetchone()[0]
             token_hash = connection.execute("SELECT token_hash FROM user_sessions").fetchone()[0]
         self.assertNotEqual(token, token_hash)
         self.assertEqual(token_hash, hashlib.sha256(token.encode()).hexdigest())
         self.assertNotIn(PASSWORD, password_hash)
+        request_logs = "\n".join(captured.output)
+        self.assertNotIn(PASSWORD.strip(), request_logs)
+        self.assertNotIn(token, request_logs)
         self.assertTrue(self.security.verify(PASSWORD, password_hash))
         self.assertFalse(self.security.verify(PASSWORD.strip(), password_hash))
         self.assertNotEqual(password_hash, self.security.hash(PASSWORD))
@@ -92,13 +100,91 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/users/me").status_code, 401)
         self.assertEqual(self.client.get("/api/v1/users/me", headers={"Cookie": f"ondo_session={token}"}).status_code, 401)
 
-    def test_session_expiry_and_restart(self):
+    def test_idle_expiry_persists_across_restart_and_protects_feedback(self):
+        self.service = AuthService(self.store, self.security, self.locations, clock=lambda: self.now, idle_seconds=30)
+        feedback = Mock()
+        feedback.list.return_value = {"items": [], "total": 0}
+        app.dependency_overrides[get_feedback_store] = lambda: feedback
         self.signup()
-        restarted = AuthService(SQLiteAuthRepository(self.path), self.security, self.locations, clock=lambda: self.now)
-        token = self.client.cookies.get("ondo_session")
-        self.assertEqual(restarted.me(token).user.email, "user@example.com")
-        self.now += AuthService.SESSION_SECONDS + 1
-        self.assertEqual(self.client.get("/api/v1/users/me").status_code, 401)
+        self.now += 29
+        resumed = self.client.get("/api/v1/users/me")
+        self.assertEqual(resumed.status_code, 200)
+        self.assertNotIn("set-cookie", resumed.headers)
+        self.service = AuthService(
+            SQLiteAuthRepository(self.path), self.security, self.locations, clock=lambda: self.now,
+            idle_seconds=30,
+        )
+        self.now += 29
+        self.assertEqual(self.client.get("/api/v1/outfit-feedback").status_code, 200)
+        self.now += 30
+        for path in ("/api/v1/users/me", "/api/v1/outfit-feedback"):
+            with self.subTest(path=path):
+                expired = self.client.get(path)
+                self.assertEqual(expired.status_code, 401)
+                self.assertEqual(expired.json()["code"], "AUTH_SESSION_EXPIRED")
+                self.assertEqual(expired.headers["cache-control"], "no-store")
+        feedback.list.assert_called_once()
+
+    def test_absolute_expiry_wins_over_recent_activity_and_matches_cookie(self):
+        self.service = AuthService(
+            self.store, self.security, self.locations, clock=lambda: self.now,
+            max_age_seconds=100, idle_seconds=30,
+        )
+        self.assertIn("Max-Age=100", self.signup().headers["set-cookie"])
+        with closing(connect_database(self.path)) as connection:
+            self.assertEqual(connection.execute("SELECT expires_at FROM user_sessions").fetchone()[0], self.now + 100)
+        for _ in range(3):
+            self.now += 25
+            self.assertEqual(self.client.get("/api/v1/users/me").status_code, 200)
+        self.now += 25
+        response = self.client.get("/api/v1/users/me")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["code"], "AUTH_SESSION_EXPIRED")
+
+    def test_legacy_session_migration_and_existing_password_login(self):
+        registered_id = self.signup().json()["data"]["user"]["id"]
+        with closing(connect_database(self.path)) as connection, connection:
+            saved_hash = connection.execute("SELECT password_hash FROM user_credentials").fetchone()[0]
+            connection.execute("UPDATE user_sessions SET expires_at = ?", (self.now + 7 * 86400,))
+            connection.execute("ALTER TABLE user_sessions DROP COLUMN last_active_at")
+        self.now += 60
+        with patch("app.common.database.get_settings", return_value=Settings("test", self.path)):
+            initialize_database(self.path)
+            self.assertEqual(self.client.get("/api/v1/users/me").status_code, 200)
+            initialize_database(self.path)
+        with closing(connect_database(self.path)) as connection:
+            self.assertEqual(connection.execute("SELECT last_active_at FROM user_sessions").fetchone()[0], self.now)
+        self.now += 30 * 60
+        self.assertEqual(self.client.get("/api/v1/users/me").json()["code"], "AUTH_SESSION_EXPIRED")
+        login = self.client.post("/api/v1/users/auth/login", json={"email": "user@example.com", "password": PASSWORD}, headers=HEADERS)
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.json()["data"]["user"]["id"], registered_id)
+        self.assertEqual(self.store.credentials("user@example.com")[1], saved_hash)
+
+    def test_legacy_session_expires_at_configured_limit_despite_recent_activity(self):
+        self.service = AuthService(
+            self.store, self.security, self.locations, clock=lambda: self.now,
+            max_age_seconds=100, idle_seconds=30,
+        )
+        self.signup()
+        issued_at = self.now
+        with closing(connect_database(self.path)) as connection, connection:
+            connection.execute("UPDATE user_sessions SET expires_at = ?", (issued_at + 7 * 86400,))
+            connection.execute("ALTER TABLE user_sessions DROP COLUMN last_active_at")
+
+        self.now = issued_at + 10
+        settings = Settings("test", self.path, session_max_age_seconds=100, session_idle_seconds=30)
+        with patch("app.common.database.get_settings", return_value=settings):
+            initialize_database()
+            for elapsed in (25, 50, 75, 99):
+                self.now = issued_at + elapsed
+                self.assertEqual(self.client.get("/api/v1/users/me").status_code, 200)
+            initialize_database()
+
+        self.now = issued_at + 100
+        expired = self.client.get("/api/v1/users/me")
+        self.assertEqual(expired.status_code, 401)
+        self.assertEqual(expired.json()["code"], "AUTH_SESSION_EXPIRED")
 
     def test_login_failure_does_not_disclose_account_existence(self):
         self.signup()
@@ -167,6 +253,21 @@ class AuthenticationTests(unittest.TestCase):
     def test_secure_cookie_can_be_enabled_for_https(self):
         with patch("app.users.presentation.router.get_settings", return_value=SimpleNamespace(session_cookie_secure=True)):
             self.assertIn("Secure", self.signup().headers["set-cookie"])
+
+    def test_https_uses_secure_http_only_cookie_on_issue_and_clear(self):
+        with closing(TestClient(app, base_url="https://testserver")) as client:
+            response = client.post("/api/v1/users/auth/register", json={
+                "name": "HTTPS 사용자", "email": "https@example.com", "password": PASSWORD,
+            }, headers=HEADERS)
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(client.get("/api/v1/users/me").status_code, 200)
+            logout = client.post("/api/v1/users/auth/logout", headers=HEADERS)
+            self.assertEqual(logout.status_code, 200)
+            for result in (response, logout):
+                for attribute in ("Secure", "HttpOnly", "SameSite=lax", "Path=/api/v1"):
+                    self.assertIn(attribute, result.headers["set-cookie"])
+            self.assertIn("Max-Age=0", logout.headers["set-cookie"])
+            self.assertEqual(client.get("/api/v1/users/me").status_code, 401)
 
 
 class NewRecommendationInputTests(unittest.TestCase):

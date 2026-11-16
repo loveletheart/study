@@ -20,7 +20,7 @@ from app.users.presentation.schemas import CreateUserRequest, UserResponse, Logi
 
 # 라우터 설정
 router = APIRouter(prefix="/users", tags=["users"], responses=error_responses(
-    ErrorCode.AUTH_REQUIRED, ErrorCode.AUTH_INVALID_CREDENTIALS, ErrorCode.AUTH_FORBIDDEN,
+    ErrorCode.AUTH_REQUIRED, ErrorCode.AUTH_SESSION_EXPIRED, ErrorCode.AUTH_INVALID_CREDENTIALS, ErrorCode.AUTH_FORBIDDEN,
     ErrorCode.AUTH_RATE_LIMITED, ErrorCode.USER_DUPLICATE_EMAIL, ErrorCode.USER_INVALID_DATA,
     ErrorCode.WEATHER_INVALID_QUERY,
 ))
@@ -49,10 +49,14 @@ def private_response(response: Response) -> None:
     response.headers["Cache-Control"] = "no-store"
 
 
-def set_session(response: Response, token: str) -> None:
+def secure_session_cookie(request: Request) -> bool:
+    return request.url.scheme == "https" or get_settings().session_cookie_secure
+
+
+def set_session(response: Response, request: Request, token: str, max_age_seconds: int) -> None:
     """확인된 세션을 HTTP 전용 쿠키로 발급한다."""
-    response.set_cookie("ondo_session", token, max_age=AuthService.SESSION_SECONDS, httponly=True,
-                        secure=get_settings().session_cookie_secure, samesite="lax", path="/api/v1")
+    response.set_cookie("ondo_session", token, max_age=max_age_seconds, httponly=True,
+                        secure=secure_session_cookie(request), samesite="lax", path="/api/v1")
     private_response(response)
 
 
@@ -60,7 +64,7 @@ def set_session(response: Response, token: str) -> None:
 def register(body: RegisterRequest, request: Request, response: Response, service: AuthDependency, token: SessionCookie = None):
     """닉네임·이메일·비밀번호로 가입하고 세션 쿠키를 발급합니다. 추천 프로필은 별도로 저장합니다."""
     account, session = service.register(body.name, body.email, body.password.get_secret_value(), request.client.host if request.client else "unknown", token)
-    set_session(response, session)
+    set_session(response, request, session, service.session_max_age_seconds)
     return ApiResponse(data=AccountResponse.from_account(account))
 
 
@@ -68,15 +72,15 @@ def register(body: RegisterRequest, request: Request, response: Response, servic
 def login(body: LoginRequest, request: Request, response: Response, service: AuthDependency, token: SessionCookie = None):
     """이메일·비밀번호를 확인하고 현재 브라우저 세션을 교체합니다. 없는 계정과 잘못된 비밀번호는 같은 안내를 반환합니다."""
     account, session = service.login(body.email, body.password.get_secret_value(), request.client.host if request.client else "unknown", token)
-    set_session(response, session)
+    set_session(response, request, session, service.session_max_age_seconds)
     return ApiResponse(data=AccountResponse.from_account(account))
 
 
 @router.post("/auth/logout", summary="현재 브라우저 로그아웃", dependencies=[Depends(require_browser_request)])
-def logout(response: Response, service: AuthDependency, token: SessionCookie = None) -> ApiResponse[dict[str, bool]]:
+def logout(request: Request, response: Response, service: AuthDependency, token: SessionCookie = None) -> ApiResponse[dict[str, bool]]:
     """현재 브라우저 세션을 폐기하고 쿠키를 삭제합니다."""
     service.logout(token)
-    response.delete_cookie("ondo_session", path="/api/v1", httponly=True, samesite="lax", secure=get_settings().session_cookie_secure)
+    response.delete_cookie("ondo_session", path="/api/v1", httponly=True, samesite="lax", secure=secure_session_cookie(request))
     private_response(response)
     return ApiResponse(data={"logged_out": True})
 

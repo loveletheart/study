@@ -52,7 +52,12 @@ async function mockAccount(page, { signedIn = false, profileReady = false } = {}
         json: success({ logged_out: true }),
       })
     }
-    if (!state.signedIn || state.expired)
+    if (state.expired)
+      return route.fulfill({
+        status: 401,
+        json: failure('AUTH_SESSION_EXPIRED', '세션이 만료되었습니다. 다시 로그인해 주세요.'),
+      })
+    if (!state.signedIn)
       return route.fulfill({
         status: 401,
         json: failure('AUTH_REQUIRED', '로그인이 필요합니다. 다시 로그인해 주세요.'),
@@ -222,11 +227,28 @@ test('세션이 만료되면 프로필을 덮어쓰지 않고 재로그인을 �
   await page.getByRole('radio', { name: '편안하게' }).check()
   state.expired = true
   await page.getByRole('button', { name: '저장하고 나의 추천 보기' }).click()
-  await expect(page.getByRole('alert')).toContainText('로그인이 필요')
+  await expect(page.getByRole('alert')).toContainText('세션이 만료되었어요')
   expect(state.current.profile.preferences.style).toBe('default')
-  await page.getByRole('link', { name: '다시 로그인' }).click()
   await expect(page.getByRole('button', { name: '로그인하기' })).toBeVisible()
   await expect(page.getByLabel('비밀번호', { exact: true })).toHaveValue('')
+  await page.getByRole('textbox', { name: '이메일', exact: true }).fill(user.email)
+  await page.getByLabel('비밀번호', { exact: true }).fill(password)
+  await page.getByRole('button', { name: '로그인하기' }).click()
+  await expect(page.getByRole('button', { name: '온도친구 님' })).toBeVisible()
+})
+
+test('새로고침 후 유효한 세션은 복원하고 쿠키가 사라지면 만료를 안내한다', async ({ page }) => {
+  const state = await mockAccount(page, { signedIn: true, profileReady: true })
+  await page.goto('./')
+  await expect(page.getByRole('button', { name: '온도친구 님' })).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('button', { name: '온도친구 님' })).toBeVisible()
+
+  state.signedIn = false
+  await page.reload()
+  await expect(page.getByRole('alert')).toContainText('세션이 만료되었어요')
+  await expect(page.getByRole('button', { name: '로그인하기' })).toBeVisible()
+  expect(await page.evaluate(() => localStorage.getItem('ondo.signed-in.v1'))).toBeNull()
 })
 
 test('설정을 취소하면 추천 조건을 변경하지 않는다', async ({ page }) => {
