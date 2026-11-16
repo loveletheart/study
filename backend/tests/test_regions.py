@@ -10,6 +10,7 @@ from contextlib import closing
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
+from threading import Event, Lock
 from unittest.mock import Mock, patch
 
 # 외부 라이브러리
@@ -29,7 +30,7 @@ from app.outfits.infrastructure.recommenders import (
 )
 from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache, CachedOutfitService
 from app.outfits.infrastructure.prompts import PERSONALIZATION_VERSION
-from app.weather.application.exceptions import InvalidWeatherQueryError, RegionNotConfiguredError
+from app.weather.application.exceptions import InvalidWeatherQueryError, RegionNotConfiguredError, WeatherProviderTimeoutError
 from app.weather.application.services import WeatherService
 from app.weather.bootstrap import get_weather_service
 from app.weather.domain.models import Location
@@ -193,6 +194,121 @@ class RegionTests(unittest.TestCase):
         self.assertEqual(second.generated_at, first.generated_at)
         self.assertEqual(second.base_version, first.base_version)
         self.fixture.llm.chat.assert_called_once()
+
+    def test_hourly_weather_refresh_is_bounded_and_saves_other_regions_before_a_timeout(self):
+        """동시 요청 상한을 지키면서 늦게 실패한 시군구보다 완료된 결과를 먼저 저장한다."""
+        cache = CachedOutfitService(
+            self.database_path, "parallel", self.factory, clock=lambda: self.fixture.now,
+            reuse_unchanged_weather=True, weather_refresh_workers=2,
+        )
+        for latitude in (39, 38, 37):
+            cache.get_region_today(99000 + latitude, latitude, 127)
+        previous = cache.get_region_today(99037, 37, 127)
+        self.fixture.now += timedelta(hours=1)
+        slow_started, fast_started, third_started = Event(), Event(), Event()
+        release_slow, release_fast, fast_saved = Event(), Event(), Event()
+        forecast = self.fixture.service.get_forecast
+        save_refresh = cache._save_refresh
+        active, peak = 0, 0
+        guard = Lock()
+
+        def load_weather(latitude, longitude):
+            nonlocal active, peak
+            with guard:
+                active += 1
+                peak = max(active, peak)
+            try:
+                if latitude == 37:
+                    slow_started.set()
+                    if not release_slow.wait(5):
+                        raise AssertionError("Slow forecast was not released")
+                    raise WeatherProviderTimeoutError()
+                if latitude == 38:
+                    fast_started.set()
+                    if not release_fast.wait(5):
+                        raise AssertionError("Fast forecast was not released")
+                if latitude == 39:
+                    third_started.set()
+                return forecast(latitude, longitude)
+            finally:
+                with guard:
+                    active -= 1
+
+        def save_result(key, loaded):
+            save_refresh(key, loaded)
+            if key[2] == 38:
+                fast_saved.set()
+
+        with (
+            patch.object(self.fixture.service, "get_forecast", side_effect=load_weather) as weather,
+            patch.object(cache, "_save_refresh", side_effect=save_result),
+            self.assertLogs("app.outfits.infrastructure.cache", level="WARNING") as logs,
+            ThreadPoolExecutor(max_workers=1) as executor,
+        ):
+            refresh = executor.submit(cache.refresh_due)
+            try:
+                self.assertTrue(slow_started.wait(2))
+                self.assertTrue(fast_started.wait(2))
+                self.assertFalse(third_started.is_set())
+                release_fast.set()
+                self.assertTrue(fast_saved.wait(2))
+                self.assertTrue(third_started.wait(2))
+                self.assertEqual(cache.get_region_today(99038, 38, 127).forecast.fetched_at, self.fixture.now)
+                self.assertEqual(cache.get_region_today(99037, 37, 127), previous)
+                self.assertFalse(refresh.done())
+                cache.refresh_due()
+            finally:
+                release_fast.set()
+                release_slow.set()
+            refresh.result(timeout=2)
+            cache.refresh_due()
+            self.assertEqual(weather.call_count, 3)
+        self.assertEqual(peak, 2)
+        self.assertIn("region:99037", " ".join(logs.output))
+        self.assertEqual(cache.get_region_today(99037, 37, 127), previous)
+        self.assertEqual(self.fixture.llm.chat.call_count, 3)
+
+        self.fixture.now += timedelta(hours=1)
+        cache.refresh_due()
+        self.assertEqual(cache.get_region_today(99037, 37, 127).forecast.fetched_at, self.fixture.now)
+        self.assertEqual(self.fixture.llm.chat.call_count, 3)
+
+    def test_hourly_refresh_loads_one_forecast_per_region_even_across_cache_instances(self):
+        """같은 시군구의 오늘·주간이 예보를 한 번 읽고, 겹친 작업과 재시작은 시도를 반복하지 않는다."""
+        today = self.cache.get_region_today(99001, 37, 127)
+        weekly = self.cache.get_region_weekly(99001, 37, 127)
+        self.fixture.now += timedelta(hours=1)
+        started, release = Event(), Event()
+        forecast = self.fixture.service.get_forecast
+        restarted = CachedOutfitService(
+            self.database_path, "test", self.factory, clock=lambda: self.fixture.now,
+            reuse_unchanged_weather=True,
+        )
+
+        def load_weather(latitude, longitude):
+            started.set()
+            if not release.wait(5):
+                raise AssertionError("Forecast was not released")
+            return forecast(latitude, longitude)
+
+        with patch.object(self.fixture.service, "get_forecast", side_effect=load_weather) as weather:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                refresh = executor.submit(self.cache.refresh_due)
+                try:
+                    self.assertTrue(started.wait(2))
+                    executor.submit(restarted.refresh_due).result(timeout=2)
+                finally:
+                    release.set()
+                refresh.result(timeout=2)
+            restarted.refresh_due()
+            weather.assert_called_once_with(37, 127)
+        refreshed_today = restarted.get_region_today(99001, 37, 127)
+        refreshed_weekly = restarted.get_region_weekly(99001, 37, 127)
+        self.assertEqual(refreshed_today.forecast.fetched_at, self.fixture.now)
+        self.assertEqual(refreshed_weekly.forecast.fetched_at, self.fixture.now)
+        self.assertEqual(refreshed_today.base_version, today.base_version)
+        self.assertEqual(refreshed_weekly.base_version, weekly.base_version)
+        self.assertEqual(self.fixture.llm.chat.call_count, 2)
 
     def test_weather_value_change_regenerates_and_updates_base_version(self):
         """모델 입력값의 작은 변화도 보수적으로 재생성해 오래된 설명을 재사용하지 않는다."""
@@ -460,3 +576,18 @@ class SharedCapacitySettingsTests(unittest.TestCase):
                 get_settings.cache_clear()
                 with self.subTest(raw=raw), self.assertRaises(ValueError):
                     get_settings()
+
+    def test_weather_refresh_worker_limit_is_configurable(self):
+        with patch.dict(os.environ, {}, clear=True), patch("app.common.config.dotenv_values", return_value={}) as dotenv:
+            get_settings.cache_clear()
+            self.addCleanup(get_settings.cache_clear)
+            self.assertEqual(get_settings().outfit_weather_refresh_workers, 4)
+            for raw in ["1", "16", "0", "17", "2.5"]:
+                dotenv.return_value = {"STUDY_OUTFIT_WEATHER_REFRESH_WORKERS": raw}
+                get_settings.cache_clear()
+                with self.subTest(raw=raw):
+                    if raw in {"1", "16"}:
+                        self.assertEqual(get_settings().outfit_weather_refresh_workers, int(raw))
+                    else:
+                        with self.assertRaises(ValueError):
+                            get_settings()

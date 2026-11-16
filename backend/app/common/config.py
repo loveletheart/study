@@ -50,6 +50,7 @@ class Settings:
     session_cookie_secure: bool = False
     session_max_age_seconds: int = DEFAULT_SESSION_MAX_AGE_SECONDS
     session_idle_seconds: int = DEFAULT_SESSION_IDLE_SECONDS
+    outfit_weather_refresh_workers: int = 4
 
 
 # 설정값 검증
@@ -141,6 +142,7 @@ def get_settings() -> Settings:
         gemini_timeout_seconds=_number_setting(values, "STUDY_GEMINI_TIMEOUT_SECONDS", 60, 1, 300),
         gemini_max_output_tokens=_integer_setting(values, "STUDY_GEMINI_MAX_OUTPUT_TOKENS", 8192, 128, 32768),
         outfit_refresh_seconds=_number_setting(values, "STUDY_OUTFIT_REFRESH_SECONDS", 3600, 60, 86400),
+        outfit_weather_refresh_workers=_integer_setting(values, "STUDY_OUTFIT_WEATHER_REFRESH_WORKERS", 4, 1, 16),
         outfit_cache_max_entries=_integer_setting(values, "STUDY_OUTFIT_CACHE_MAX_ENTRIES", 4096, 1, 100000),
         outfit_weekly_batch_hour=_integer_setting(values, "STUDY_OUTFIT_WEEKLY_BATCH_HOUR", 1, 0, 23),
         outfit_weekly_max_age_seconds=_number_setting(values, "STUDY_OUTFIT_WEEKLY_MAX_AGE_SECONDS", 172800, 86400, 604800),

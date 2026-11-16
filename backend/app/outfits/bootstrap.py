@@ -110,6 +110,7 @@ def get_cached_outfit_service() -> CachedOutfitService:
         max_entries=settings.outfit_cache_max_entries,
         weekly_batch_only=True, weekly_batch_hour=settings.outfit_weekly_batch_hour,
         weekly_max_age_seconds=settings.outfit_weekly_max_age_seconds,
+        weather_refresh_workers=settings.outfit_weather_refresh_workers,
     )
 
 

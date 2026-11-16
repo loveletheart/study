@@ -34,11 +34,14 @@ class OutfitService:
 
     def get_today(self, latitude: float, longitude: float) -> TodayOutfitResult:
         """오늘의 추천·비추천 옷차림 구성"""
-        forecast = self._get_forecast(latitude, longitude)
-        return self._today(forecast)
+        return self.recommend_today(self.get_forecast(latitude, longitude))
 
-    def _today(self, forecast: OutfitForecast) -> TodayOutfitResult:
-        """검증한 오늘 예보로 새 기본 추천 생성"""
+    def recommend_today(
+        self, forecast: OutfitForecast, previous: TodayOutfitResult | None = None,
+    ) -> TodayOutfitResult:
+        """조회한 예보에서 오늘 모델 입력이 바뀌었을 때만 다시 생성한다."""
+        if previous is not None and forecast.days[:1] == previous.forecast.days[:1]:
+            return replace(previous, forecast=forecast)
         generated = self._recommend(forecast.days[:1])
         return TodayOutfitResult(
             forecast, generated.recommendations[0], generated.engine, datetime.now(KST), uuid4().hex,
@@ -46,11 +49,14 @@ class OutfitService:
 
     def get_weekly(self, latitude: float, longitude: float) -> WeeklyOutfitResult:
         """7일 옷차림과 공통 준비 의류 구성"""
-        forecast = self._get_forecast(latitude, longitude)
-        return self._weekly(forecast)
+        return self.recommend_weekly(self.get_forecast(latitude, longitude))
 
-    def _weekly(self, forecast: OutfitForecast) -> WeeklyOutfitResult:
-        """검증한 주간 예보로 새 기본 추천 생성"""
+    def recommend_weekly(
+        self, forecast: OutfitForecast, previous: WeeklyOutfitResult | None = None,
+    ) -> WeeklyOutfitResult:
+        """조회한 예보에서 주간 모델 입력이 바뀌었을 때만 다시 생성한다."""
+        if previous is not None and forecast.days == previous.forecast.days:
+            return replace(previous, forecast=forecast)
         generated = self._recommend(forecast.days)
         daily = generated.recommendations
         minimum = min(day.temperature_min_c for day in forecast.days)
@@ -62,17 +68,11 @@ class OutfitService:
 
     def refresh_today(self, latitude: float, longitude: float, previous: TodayOutfitResult) -> TodayOutfitResult:
         """오늘 판단에 사용하는 날씨가 같으면 기존 추천과 생성 버전 유지"""
-        forecast = self._get_forecast(latitude, longitude)
-        if forecast.days[:1] == previous.forecast.days[:1]:
-            return replace(previous, forecast=forecast)
-        return self._today(forecast)
+        return self.recommend_today(self.get_forecast(latitude, longitude), previous)
 
     def refresh_weekly(self, latitude: float, longitude: float, previous: WeeklyOutfitResult) -> WeeklyOutfitResult:
         """주간 판단에 사용하는 날씨가 같으면 모델을 다시 호출하지 않음"""
-        forecast = self._get_forecast(latitude, longitude)
-        if forecast.days == previous.forecast.days:
-            return replace(previous, forecast=forecast)
-        return self._weekly(forecast)
+        return self.recommend_weekly(self.get_forecast(latitude, longitude), previous)
 
     def _recommend(self, days: tuple[OutfitWeather, ...]) -> GeneratedOutfits:
         """생성 결과의 날짜·온도·날씨가 원본과 일치하는지 확인"""
@@ -88,7 +88,7 @@ class OutfitService:
                 raise OutfitLlmResponseError()
         return generated
 
-    def _get_forecast(self, latitude: float, longitude: float) -> OutfitForecast:
+    def get_forecast(self, latitude: float, longitude: float) -> OutfitForecast:
         """오늘부터 연속된 7일 예보인지 확인"""
         forecast = self._weather.get_forecast(latitude, longitude)
         expected = tuple(forecast.today + timedelta(days=index) for index in range(7))

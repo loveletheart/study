@@ -7,7 +7,8 @@ import hashlib
 import json
 from _thread import LockType
 from collections.abc import Callable
-from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import ExitStack, closing
 from datetime import datetime
 from pathlib import Path
 from threading import Event, Lock
@@ -25,6 +26,7 @@ from app.common.database import connect_database
 from app.outfits.application.dto import (
     TodayOutfitResult,
     WeeklyOutfitResult,
+    OutfitForecast,
     GeneratedOutfits,
     PersonalizedOutfits,
 )
@@ -94,6 +96,7 @@ class CachedOutfitService:
         reuse_unchanged_weather: bool = False,
         max_entries: int = 128,
         weekly_batch_only: bool = False, weekly_batch_hour: int = 1, weekly_max_age_seconds: float = 172800,
+        weather_refresh_workers: int = 4,
     ) -> None:
         """저장 경로와 갱신 주기를 설정한다."""
         self._database_path = database_path
@@ -105,9 +108,11 @@ class CachedOutfitService:
         self._weekly_batch_only = weekly_batch_only
         self._weekly_batch_hour = weekly_batch_hour
         self._weekly_max_age_seconds = weekly_max_age_seconds
+        self._weather_refresh_workers = weather_refresh_workers
         self._clock = clock or (lambda: datetime.now(KST))
         self._generation_locks: WeakValueDictionary[CacheKey, LockType] = WeakValueDictionary()
         self._generation_locks_guard = Lock()
+        self._refresh_lock = Lock()
         with closing(connect_database(database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(CREATE_CACHE_TABLE)
@@ -216,7 +221,10 @@ class CachedOutfitService:
             return None
         return result
 
-    def _generate(self, key: CacheKey, record_attempt: bool = True) -> OutfitResult:
+    def _generate(
+        self, key: CacheKey, record_attempt: bool = True,
+        *, loaded: tuple[OutfitService, OutfitForecast] | None = None,
+    ) -> OutfitResult:
         """시도 시각을 기록하고 성공한 결과만 원자적으로 교체"""
         if record_attempt:
             with closing(connect_database(self._database_path)) as connection, connection:
@@ -225,24 +233,28 @@ class CachedOutfitService:
                     "WHERE scope=? AND kind=? AND latitude=? AND longitude=?",
                     (self._clock().timestamp(), *key),
                 )
-        service = self._service_factory()
+        service, forecast = loaded if loaded is not None else (self._service_factory(), None)
         kind, latitude, longitude = key[1].rsplit(":", 1)[-1], key[2], key[3]
         previous = self._read(key) if self._reuse_unchanged_weather else None
         result: OutfitResult
         if kind == "today":
-            if previous is None:
+            if previous is not None and not isinstance(previous, TodayOutfitResult):
+                raise OutfitForecastError()
+            if forecast is not None:
+                result = service.recommend_today(forecast, previous)
+            elif previous is None:
                 result = service.get_today(latitude, longitude)
-            elif isinstance(previous, TodayOutfitResult):
+            else:
                 result = service.refresh_today(latitude, longitude, previous)
-            else:
-                raise OutfitForecastError()
         elif kind == "weekly":
-            if previous is None:
-                result = service.get_weekly(latitude, longitude)
-            elif isinstance(previous, WeeklyOutfitResult):
-                result = service.refresh_weekly(latitude, longitude, previous)
-            else:
+            if previous is not None and not isinstance(previous, WeeklyOutfitResult):
                 raise OutfitForecastError()
+            if forecast is not None:
+                result = service.recommend_weekly(forecast, previous)
+            elif previous is None:
+                result = service.get_weekly(latitude, longitude)
+            else:
+                result = service.refresh_weekly(latitude, longitude, previous)
         else:
             raise ValueError("지원하지 않는 추천 조회 종류입니다.")
         if result.forecast.today != self._clock().astimezone(KST).date():
@@ -294,46 +306,127 @@ class CachedOutfitService:
             return due, self._read(key)
 
     def refresh_due(self, stopped: Event | None = None) -> None:
-        """조회 이력이 있는 지역을 순차 갱신하고 실패한 지역은 다음 주기에 재시도"""
+        """시군구 예보를 동시에 조회하고 먼저 끝난 결과부터 저장한다."""
+        if not self._refresh_lock.acquire(blocking=False):
+            return
+        try:
+            self._refresh_requested(stopped)
+        finally:
+            self._refresh_lock.release()
+
+    def _refresh_requested(self, stopped: Event | None) -> None:
+        now = self._clock().astimezone(KST)
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         with closing(connect_database(self._database_path)) as connection:
             rows = connection.execute(
-                "SELECT kind, latitude, longitude FROM outfit_result_cache "
-                "WHERE scope=? AND requested_at>=? ORDER BY attempted_at",
-                (self._scope, self._clock().timestamp() - 86400),
+                "SELECT kind, latitude, longitude, (attempted_at<=? OR attempted_at<?) AS due "
+                "FROM outfit_result_cache WHERE scope=? AND requested_at>=? "
+                "ORDER BY requested_at DESC, rowid DESC",
+                (now.timestamp() - self._refresh_seconds, midnight, self._scope, now.timestamp() - 86400),
             ).fetchall()
+        regions: dict[str, list[CacheKey]] = {}
+        representatives: dict[str, tuple[float, float]] = {}
+        coordinates: list[CacheKey] = []
         for row in rows:
+            kind = row["kind"]
+            if self._weekly_batch_only and kind.rsplit(":", 1)[-1] == "weekly":
+                continue
+            location = row["latitude"], row["longitude"]
+            key = self._key(kind, *location)
+            if kind.startswith("region:"):
+                region = kind.rsplit(":", 1)[0]
+                if representatives.setdefault(region, location) == location and row["due"]:
+                    regions.setdefault(region, []).append(key)
+            elif row["due"]:
+                coordinates.append(key)
+        if regions:
+            self._refresh_regions(regions, stopped)
+        for key in coordinates:
             if stopped is not None and stopped.is_set():
                 return
-            if self._weekly_batch_only and row["kind"].rsplit(":", 1)[-1] == "weekly":
-                continue
-            key = self._key(row["kind"], row["latitude"], row["longitude"])
             with self._lock_for(key):
                 if stopped is not None and stopped.is_set():
                     return
-                with closing(connect_database(self._database_path)) as connection:
-                    current = connection.execute(
-                        "SELECT attempted_at, prepared_for FROM outfit_result_cache WHERE scope=? AND kind=? AND latitude=? AND longitude=?",
-                        key,
-                    ).fetchone()
-                now = self._clock().astimezone(KST)
-                midnight = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+                if self._claim_refresh([key]):
+                    self._save_refresh(key)
+
+    def _claim_refresh(self, keys: list[CacheKey]) -> list[CacheKey]:
+        """외부 호출 전에 갱신 기한을 재확인하고 시도 시각을 저장한다."""
+        claimed = []
+        now = self._clock().astimezone(KST)
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        with closing(connect_database(self._database_path)) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for key in keys:
+                current = connection.execute(
+                    "SELECT attempted_at, prepared_for FROM outfit_result_cache "
+                    "WHERE scope=? AND kind=? AND latitude=? AND longitude=?", key,
+                ).fetchone()
                 if current is None or (
                     now.timestamp() - current["attempted_at"] < self._refresh_seconds
                     and current["attempted_at"] >= midnight
                 ):
                     continue
                 due = current["attempted_at"] + self._refresh_seconds
-                if current["prepared_for"] >= due and self._read(key) is not None:
-                    with closing(connect_database(self._database_path)) as connection, connection:
-                        connection.execute(
-                            "UPDATE outfit_result_cache SET attempted_at=?, prepared_for=0 "
-                            "WHERE scope=? AND kind=? AND latitude=? AND longitude=?", (due, *key),
-                        )
-                    continue
-                try:
-                    self._generate(key)
-                except Exception as exc:
-                    logger.warning("옷차림 사전 갱신 실패: kind=%s, cause=%s", row["kind"], type(exc).__name__)
+                prepared = current["prepared_for"] >= due and self._read(key) is not None
+                connection.execute(
+                    "UPDATE outfit_result_cache SET attempted_at=?, prepared_for=0 "
+                    "WHERE scope=? AND kind=? AND latitude=? AND longitude=?",
+                    (due if prepared else now.timestamp(), *key),
+                )
+                if not prepared:
+                    claimed.append(key)
+        return claimed
+
+    def _refresh_regions(self, regions: dict[str, list[CacheKey]], stopped: Event | None) -> None:
+        # 키 잠금은 예보 조회부터 추천 저장까지 유지하되, 모델은 완료 결과를 처리하는 스레드에서 호출한다.
+        with ExitStack() as pending, ThreadPoolExecutor(max_workers=self._weather_refresh_workers) as pool:
+            futures = {}
+            for region, keys in regions.items():
+                if stopped is not None and stopped.is_set():
+                    break
+                locks = pending.enter_context(ExitStack())
+                future = pool.submit(self._load_refresh_forecast, keys, locks, stopped)
+                futures[future] = region, locks
+            for future in as_completed(futures):
+                region, locks = futures[future]
+                with locks:
+                    try:
+                        loaded = future.result()
+                    except Exception as exc:
+                        logger.warning("시군구 날씨 갱신 실패: region=%s, cause=%s", region, type(exc).__name__)
+                        continue
+                    if loaded is not None and (stopped is None or not stopped.is_set()):
+                        keys, service, forecast = loaded
+                        for key in keys:
+                            if stopped is not None and stopped.is_set():
+                                return
+                            self._save_refresh(key, (service, forecast))
+
+    def _load_refresh_forecast(
+        self, keys: list[CacheKey], locks: ExitStack, stopped: Event | None,
+    ) -> tuple[list[CacheKey], OutfitService, OutfitForecast] | None:
+        if stopped is not None and stopped.is_set():
+            return None
+        targets = []
+        for key in keys:
+            lock = self._lock_for(key)
+            if lock.acquire(blocking=False):
+                locks.callback(lock.release)
+                targets.append(key)
+        if not targets:
+            return None
+        claimed = self._claim_refresh(targets)
+        if not claimed:
+            return None
+        service = self._service_factory()
+        return claimed, service, service.get_forecast(*claimed[0][2:])
+
+    def _save_refresh(self, key: CacheKey, loaded: tuple[OutfitService, OutfitForecast] | None = None) -> None:
+        try:
+            self._generate(key, record_attempt=False, loaded=loaded)
+        except Exception as exc:
+            logger.warning("옷차림 사전 갱신 실패: kind=%s, cause=%s", key[1], type(exc).__name__)
 
     def run_weekly_batch(self, stopped: Event | None = None, on_ready=None, force: bool = False) -> dict:
         """한국 시간 지정된 한 시간 안에 하루 한 번 시작하고 요청 경로와 분리해 주간 생성"""
