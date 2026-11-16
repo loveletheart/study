@@ -1,12 +1,15 @@
 """공유 캐시로 날씨 API와 추천 갱신의 예보 정책을 검증한다."""
 
+import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
 from threading import Event, Lock
 from unittest.mock import Mock, patch
+from uuid import uuid4
 
+from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError, RedisError
 
 from app.common.config import Settings
@@ -18,8 +21,10 @@ from app.weather.application.exceptions import (
     WeatherRateLimitError,
 )
 from app.weather.application.services import WeatherService
-from app.weather.bootstrap import get_forecast_cache
+from app.weather.bootstrap import get_forecast_cache, get_weather_provider
+from app.weather.domain.models import KST
 from app.weather.infrastructure.cache import TTLCache
+from app.weather.infrastructure.forecast_cache import MemoryForecastCache
 from app.weather.infrastructure.open_meteo import OpenMeteoProvider
 from app.weather.infrastructure.redis_cache import RedisForecastCache
 from app.weather.presentation.router import get_today, get_weekly
@@ -221,3 +226,75 @@ class RedisWeatherTests(unittest.TestCase):
             from_url.call_args.kwargs["retry"].call_with_retry(connect, lambda error: None)
         connect.assert_called_once()
 
+    @unittest.skipUnless(os.getenv("STUDY_TEST_REDIS_URL"), "Set STUDY_TEST_REDIS_URL for the Redis integration test")
+    def test_real_redis_reuses_forecast_across_new_clients_and_services(self):
+        url = os.environ["STUDY_TEST_REDIS_URL"]
+        latitude = 37 + (uuid4().int % 10**12) / 10**12
+        key = f"study:weather:forecast:v1:{{open-meteo:{self.now.astimezone(KST).date()}:{latitude}:127.0}}"
+        with (
+            Redis.from_url(url, socket_connect_timeout=1, socket_timeout=1) as writer,
+            Redis.from_url(url, socket_connect_timeout=1, socket_timeout=1) as reader,
+        ):
+            try:
+                self.redis = writer
+                first = self.make_service().get_weekly(latitude, 127)
+                self.redis = reader
+                self.assertEqual(self.make_service().get_weekly(latitude, 127), first)
+                self.http.get.assert_called_once()
+            finally:
+                writer.delete(key)
+
+
+class MemoryWeatherTests(unittest.TestCase):
+    def setUp(self):
+        self.now = NOW
+        self.http = Mock()
+        self.http.get.side_effect = lambda *args: forecast_payload(self.now)
+        provider = OpenMeteoProvider(self.http, TTLCache(0), clock=lambda: self.now)
+        cache = MemoryForecastCache(freshness_seconds=3600, max_age_seconds=10800, clock=lambda: self.now)
+        self.service = WeatherService(provider, forecast_cache=cache)
+
+    def test_memory_cache_keeps_original_timestamp_during_provider_failure(self):
+        initial = get_today(37, 127, self.service).data
+        self.now += timedelta(minutes=59)
+        self.assertEqual(get_weekly(37, 127, self.service).data.fetched_at, initial.fetched_at)
+        self.http.get.assert_called_once()
+
+        self.now += timedelta(minutes=2)
+        self.http.get.side_effect = WeatherProviderTimeoutError()
+        stale = get_today(37, 127, self.service).data
+        self.assertTrue(stale.is_stale)
+        self.assertEqual(stale.fetched_at, initial.fetched_at)
+        with self.assertRaises(WeatherProviderTimeoutError):
+            WeatherServiceReader(self.service).get_forecast(37, 127)
+
+    def test_memory_cache_does_not_return_expired_or_previous_day_forecast(self):
+        for before, delta in (
+            (NOW, timedelta(hours=3)),
+            (NOW.replace(hour=14, minute=58), timedelta(minutes=3)),
+        ):
+            with self.subTest(before=before, delta=delta):
+                self.setUp()
+                self.now = before
+                self.service.get_today(37, 127)
+                self.now += delta
+                self.http.get.side_effect = WeatherProviderTimeoutError()
+                with self.assertRaises(WeatherProviderTimeoutError):
+                    self.service.get_today(37, 127)
+
+    def test_bootstrap_configures_one_memory_cache_and_respects_disabled_ttl(self):
+        self.addCleanup(get_forecast_cache.cache_clear)
+        self.addCleanup(get_weather_provider.cache_clear)
+        for ttl in (3600, 0):
+            with self.subTest(ttl=ttl):
+                get_forecast_cache.cache_clear()
+                get_weather_provider.cache_clear()
+                settings = Settings("Test", Path("unused.db"), weather_cache_ttl_seconds=ttl)
+                with patch("app.weather.bootstrap.get_settings", return_value=settings):
+                    cache = get_forecast_cache()
+                    if ttl:
+                        self.assertIsInstance(cache, MemoryForecastCache)
+                        self.assertIs(get_forecast_cache(), cache)
+                    else:
+                        self.assertIsNone(cache)
+                    self.assertFalse(get_weather_provider()._cache_forecasts)

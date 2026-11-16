@@ -6,6 +6,7 @@ from app.common.config import get_settings
 from app.weather.application.ports import ForecastCache
 from app.weather.application.services import WeatherService
 from app.weather.infrastructure.cache import TTLCache
+from app.weather.infrastructure.forecast_cache import MemoryForecastCache
 from app.weather.infrastructure.http_client import JsonHttpClient
 from app.weather.infrastructure.open_meteo import OpenMeteoProvider
 from app.weather.infrastructure.location_catalog import SQLiteLocationCatalog, SQLiteLocationSearch
@@ -19,16 +20,21 @@ def get_weather_provider() -> OpenMeteoProvider:
     return OpenMeteoProvider(
         http=JsonHttpClient(settings.weather_timeout_seconds),
         cache=TTLCache(settings.weather_cache_ttl_seconds),
-        cache_forecasts=not settings.weather_redis_url,
+        cache_forecasts=False,
     )
 
 
 @lru_cache
 def get_forecast_cache() -> ForecastCache | None:
-    """Redis가 설정된 경우 서버 수명 동안 같은 예보 캐시를 쓴다."""
+    """서버에서 공유할 Redis 또는 메모리 예보 캐시를 구성한다."""
     settings = get_settings()
-    if not settings.weather_redis_url or settings.weather_cache_ttl_seconds == 0:
+    if settings.weather_cache_ttl_seconds == 0:
         return None
+    if not settings.weather_redis_url:
+        return MemoryForecastCache(
+            freshness_seconds=settings.weather_cache_ttl_seconds,
+            max_age_seconds=settings.weather_cache_stale_max_seconds,
+        )
 
     from redis import Redis
     from redis.backoff import NoBackoff

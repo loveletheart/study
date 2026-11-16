@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$SetupOnly,
     [switch]$Test,
     [ValidateRange(1, 65535)]
@@ -57,6 +57,23 @@ function Find-BootstrapPython {
     throw 'Python 3.11+ was not found. Install Python or pass -Python with its executable path.'
 }
 
+function Test-FrontendBuild([IO.FileInfo]$Index) {
+    $html = Get-Content -LiteralPath $Index.FullName -Raw -Encoding UTF8
+    $assetPattern = '\b(?:src|href)\s*=\s*["''](?:/app/|\./)?(assets/[^"''?#]+\.(?:js|css))(?:[?#][^"'']*)?["'']'
+    $assetPaths = foreach ($asset in [regex]::Matches($html, $assetPattern)) {
+        $asset.Groups[1].Value
+    }
+    if (-not ($assetPaths | Where-Object { $_ -like '*.js' })) {
+        return $false
+    }
+    foreach ($assetPath in $assetPaths) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Index.DirectoryName $assetPath) -PathType Leaf)) {
+            return $false
+        }
+    }
+    return $true
+}
+
 function Initialize-Frontend([string]$FrontendDirectory) {
     Push-Location -LiteralPath $FrontendDirectory
     try {
@@ -68,7 +85,7 @@ function Initialize-Frontend([string]$FrontendDirectory) {
             ($packageFiles | Where-Object { $_.LastWriteTimeUtc -gt $installedLock.LastWriteTimeUtc })
 
         $builtIndex = Get-Item -LiteralPath 'dist/index.html' -ErrorAction SilentlyContinue
-        if (-not $needsInstall -and $builtIndex -and (Test-Path -LiteralPath 'dist/assets' -PathType Container)) {
+        if (-not $needsInstall -and $builtIndex -and (Test-FrontendBuild $builtIndex)) {
             $buildInputs = @(
                 $installedLock
                 Get-Item -LiteralPath 'index.html', 'tsconfig.json', 'vite.config.js', 'src', 'public'

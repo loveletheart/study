@@ -80,10 +80,12 @@ STUDY_WEATHER_CACHE_STALE_MAX_SECONDS=10800
 ```
 
 - 오늘·주간 날씨와 대표 좌표가 같은 시군구 추천은 제공사·좌표·한국 날짜로 구분한 7일 예보를 공유합니다. Redis URL이 없으면 프로세스 메모리 캐시를 사용하고, `STUDY_WEATHER_CACHE_TTL_SECONDS=0`이면 두 캐시 모두 비활성화합니다.
-- 조회 후 기본 1시간까지 최신으로 사용하고 Redis에는 최대 3시간 보관합니다. 같은 키의 갱신은 Redis 잠금으로 조율합니다. 제공사 오류는 5초 동안 공유해 동시 요청이 갱신을 반복하지 않게 합니다.
+- 두 캐시 모두 조회 후 기본 1시간 동안 최신으로 판단하며, 이전 예보는 최대 3시간까지 재사용할 수 있습니다. 같은 프로세스의 동시 갱신은 한 번으로 합칩니다. Redis에서는 프로세스 간 갱신도 잠금으로 조율하고 제공사 오류를 5초 동안 공유합니다.
 - 시간 초과, 연결 장애, 요청 한도 초과 시 같은 한국 날짜의 보관 중인 마지막 정상 예보를 날씨 화면에 반환할 수 있습니다. 잘못된 데이터나 날짜에는 기존 오류를 반환합니다. 옷차림 갱신은 이전 예보를 갱신 성공으로 기록하지 않습니다.
 - Redis 연결과 명령의 대기 제한은 각 1초입니다. 캐시 조회에 실패하면 Redis 명령을 재시도하지 않고 Open-Meteo에 직접 요청합니다. FastAPI 재시작 후에도 Redis에 남은 예보를 사용합니다. Redis 재시작까지 보존하려면 Redis의 영속화 옵션을 설정합니다. ([Redis 영속화 안내](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/))
 - HTTP 요청은 기본 10초 타임아웃과 1MiB 응답 크기 제한을 사용합니다.
+
+실제 Redis에서 새 클라이언트가 기존 예보를 재사용하는지 검증하려면 `STUDY_TEST_REDIS_URL`에 테스트용 Redis 주소를 설정하고 `backend`에서 가상환경 Python으로 `python -m unittest tests.test_weather_redis`를 실행합니다.
 
 | 상태 | 의미 |
 | --- | --- |

@@ -191,7 +191,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `STUDY_WEATHER_TIMEOUT_SECONDS` | `10` | 외부 날씨 API 제한 시간(0.1~30초) |
 | `STUDY_WEATHER_CACHE_TTL_SECONDS` | `3600` | 예보를 최신으로 판단하는 시간(0~3600초, 0은 캐시 해제) |
 | `STUDY_WEATHER_REDIS_URL` | 미설정 | Redis 예보 캐시 연결 주소. 미설정 시 프로세스 메모리 캐시 사용 |
-| `STUDY_WEATHER_CACHE_STALE_MAX_SECONDS` | `10800` | Redis 예보의 최대 보관 시간. 최신 유효 시간 이상, 최대 86400초 |
+| `STUDY_WEATHER_CACHE_STALE_MAX_SECONDS` | `10800` | 메모리·Redis 예보의 최대 재사용 시간. 최신 유효 시간 이상, 최대 86400초 |
 | `STUDY_LLM_BASE_URL` | `http://127.0.0.1:11434` | Ollama 서버의 기본 주소 |
 | `STUDY_LLM_MODEL` | 빈 문자열 | 직접 준비한 로컬 모델명 |
 | `STUDY_LLM_THINKING` | 미지정 | Ollama 추론 모드. `true`/`false`, 미지정은 서버 기본값. 지원하는 모델에서만 설정 |

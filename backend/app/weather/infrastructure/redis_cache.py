@@ -2,10 +2,8 @@
 
 import logging
 from collections.abc import Callable
-from concurrent.futures import Future
 from datetime import date, datetime
 from math import ceil
-from threading import Lock
 from uuid import uuid4
 
 from pydantic import TypeAdapter, ValidationError
@@ -14,18 +12,15 @@ from redis.exceptions import RedisError
 
 from app.weather.application.dto import ForecastResult
 from app.weather.application.exceptions import (
-    WeatherError,
     WeatherProviderDataError,
     WeatherProviderTimeoutError,
-    WeatherProviderUnavailableError,
-    WeatherRateLimitError,
 )
-from app.weather.domain.models import KST, Coordinates, WeatherForecast
+from app.weather.domain.models import Coordinates, WeatherForecast
+from app.weather.infrastructure.forecast_cache import ForecastCacheBase, TRANSIENT_ERRORS
 
 
 logger = logging.getLogger(__name__)
 FORECAST_ADAPTER = TypeAdapter(WeatherForecast)
-TRANSIENT_ERRORS = (WeatherProviderTimeoutError, WeatherProviderUnavailableError, WeatherRateLimitError)
 CACHEABLE_ERRORS = (*TRANSIENT_ERRORS, WeatherProviderDataError)
 PROVIDER_ERRORS = {
     error.__name__: error for error in CACHEABLE_ERRORS
@@ -38,47 +33,22 @@ end
 """
 
 
-class RedisForecastCache:
+class RedisForecastCache(ForecastCacheBase):
     def __init__(
         self, client: Redis, *, freshness_seconds: float, max_age_seconds: float,
         weather_timeout_seconds: float, clock: Callable[[], datetime] | None = None,
     ) -> None:
+        super().__init__(freshness_seconds=freshness_seconds, max_age_seconds=max_age_seconds, clock=clock)
         self._client = client
-        self._freshness = freshness_seconds
-        self._max_age = max_age_seconds
         self._lock_seconds = max(30.0, 3 * weather_timeout_seconds)
         self._wait_seconds = weather_timeout_seconds + 1
-        self._clock = clock or (lambda: datetime.now(KST))
-        self._guard = Lock()
-        self._pending: dict[str, Future[ForecastResult]] = {}
-
-    def get_or_load(self, coordinates: Coordinates, load: Callable[[], WeatherForecast]) -> ForecastResult:
-        now = self._clock().astimezone(KST)
-        latitude = float(coordinates.latitude or 0)
-        longitude = float(coordinates.longitude or 0)
-        key = f"study:weather:forecast:v1:{{open-meteo:{now.date()}:{latitude}:{longitude}}}"
-        with self._guard:
-            pending: Future[ForecastResult] | None = self._pending.get(key)
-            owns_request = pending is None
-            if pending is None:
-                pending = Future()
-                self._pending[key] = pending
-        if not owns_request:
-            return pending.result()
-        try:
-            result = self._resolve(key, now.date(), coordinates, load)
-            pending.set_result(result)
-            return result
-        except BaseException as exc:
-            pending.set_exception(exc)
-            raise
-        finally:
-            with self._guard:
-                self._pending.pop(key)
 
     def _resolve(
-        self, key: str, forecast_date: date, coordinates: Coordinates, load: Callable[[], WeatherForecast],
+        self, forecast_date: date, coordinates: Coordinates, load: Callable[[], WeatherForecast],
     ) -> ForecastResult:
+        latitude = float(coordinates.latitude or 0)
+        longitude = float(coordinates.longitude or 0)
+        key = f"study:weather:forecast:v1:{{open-meteo:{forecast_date}:{latitude}:{longitude}}}"
         lock_key = f"{key}:refresh"
         token = uuid4().hex
         lock = None
@@ -87,7 +57,7 @@ class RedisForecastCache:
         try:
             try:
                 cached = self._read(key, coordinates)
-                result = self._cached_result(key, cached)
+                result = self._cached_result(key, cached, coordinates)
                 if result is not None:
                     return result
                 lock = self._client.lock(
@@ -95,7 +65,7 @@ class RedisForecastCache:
                 )
                 acquired = lock.acquire(token=token)
                 cached = self._read(key, coordinates)
-                result = self._cached_result(key, cached)
+                result = self._cached_result(key, cached, coordinates)
                 if result is not None:
                     return result
                 if not acquired:
@@ -131,12 +101,12 @@ class RedisForecastCache:
             return None
         return forecast if self._usable(forecast, coordinates) else None
 
-    def _cached_result(self, key: str, cached: WeatherForecast | None) -> ForecastResult | None:
-        if cached is not None:
-            now = self._clock().astimezone(KST)
-            age = now.timestamp() - cached.fetched_at.timestamp()
-            if cached.daily[0].date == now.date() and 0 <= age < self._freshness:
-                return ForecastResult(cached)
+    def _cached_result(
+        self, key: str, cached: WeatherForecast | None, coordinates: Coordinates,
+    ) -> ForecastResult | None:
+        result = self._fresh_result(cached, coordinates)
+        if result is not None:
+            return result
         failure = self._client.get(f"{key}:error")
         if isinstance(failure, bytes):
             failure = failure.decode("ascii", errors="replace")
@@ -145,30 +115,8 @@ class RedisForecastCache:
         error = PROVIDER_ERRORS.get(failure)
         return self._stale_or_raise(cached, error()) if error is not None else None
 
-    def _stale_or_raise(self, cached: WeatherForecast | None, error: WeatherError) -> ForecastResult:
-        if isinstance(error, TRANSIENT_ERRORS) and cached is not None and self._usable(cached, cached.coordinates):
-            return ForecastResult(cached, error)
-        raise error
-
-    def _age(self, forecast: WeatherForecast) -> float:
-        return self._clock().timestamp() - forecast.fetched_at.timestamp()
-
-    def _usable(self, forecast: WeatherForecast, coordinates: Coordinates) -> bool:
-        now = self._clock().astimezone(KST)
-        return (
-            forecast.coordinates == coordinates
-            and forecast.timezone == "Asia/Seoul"
-            and forecast.provider == "Open-Meteo"
-            and forecast.fetched_at.utcoffset() is not None
-            and 0 <= now.timestamp() - forecast.fetched_at.timestamp() < self._max_age
-            and len(forecast.daily) == 7
-            and forecast.daily[0].date == forecast.fetched_at.astimezone(KST).date() == now.date()
-            and len(forecast.hourly) == 168
-        )
-
     def _save(self, lock_key: str, key: str, token: str, value: str | bytes, seconds: int) -> None:
         try:
             self._client.eval(SAVE_IF_OWNER, 2, lock_key, key, token, value, seconds)
         except RedisError as exc:
             logger.warning("Redis 예보 캐시 저장 실패: cause=%s", type(exc).__name__)
-
