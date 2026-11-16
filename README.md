@@ -18,9 +18,15 @@ Flask로 개발할 때 비동기 뷰를 쓰기 위해 의존성을 추가하고,
 
  Node.js 환경에서 화면을 간단하게 구성하려고 했습니다. 개발을 진행하면서 지역을 검색하고 취향을 입력한 뒤 옷차림을 확인하는 과정을 브라우저에서 직접 테스트할 필요가 생겼습니다. 그래서 지역 검색, 취향 입력, 추천 카드를 컴포넌트로 나누고 실제 사용 흐름을 화면에서 검증할 수 있도록 Vue를 선택했습니다. [프론트엔드 개발과 테스트](frontend/README.md)
 
+### Redis를 선택한 이유
+
+같은 지역의 예보를 여러 사용자가 반복해서 조회하고, 시군구 옷차림 추천도 대표 좌표의 예보를 사용합니다. Redis를 연결하면 날씨 화면과 추천 갱신이 같은 예보를 공유하고, FastAPI를 재시작한 뒤에도 Redis에 남아 있는 데이터를 읽을 수 있습니다. 같은 좌표의 갱신 요청도 한 번으로 합쳐 Open-Meteo 호출을 줄입니다.
+
+예보는 기본 1시간 동안 최신으로 보고 최대 3시간 보관합니다. 제공사에 일시 장애가 생기면 같은 한국 날짜의 마지막 정상 예보와 실제 조회 시각을 화면에 표시합니다. 계정과 옷차림 추천 결과는 SQLite에 저장합니다.
+
 ## 실행
 
-Windows에 Python 3.11 이상이 설치되어 있어야 합니다. 새로 체크아웃한 경우에도 프로젝트 폴더의 PowerShell에서 아래 명령 하나로 실행합니다.
+Windows에 Python 3.11 이상과 Node.js 20.19 이상(20.x) 또는 22.12 이상이 설치되어 있어야 합니다. 새로 체크아웃한 경우에도 프로젝트 폴더의 PowerShell에서 아래 명령 하나로 실행합니다.
 
 ```powershell
 .\run.cmd
@@ -31,7 +37,8 @@ Windows에 Python 3.11 이상이 설치되어 있어야 합니다. 새로 체크
 1. `.venv`가 없으면 생성합니다. 활성화 스크립트가 누락된 가상환경도 복구합니다.
 2. `.venv`를 활성화하고 프로젝트 가상환경의 Python인지 확인합니다.
 3. `.venv`의 pip로 `backend/requirements.txt` 의존성을 확인·설치합니다.
-4. `.venv`의 Python으로 Uvicorn 서버를 실행합니다.
+4. 프런트엔드 의존성이 없거나 패키지 설정이 바뀌면 `npm ci`로 설치합니다. 화면 빌드가 없거나 입력 파일이 바뀌면 `npm run build`로 갱신합니다.
+5. `.venv`의 Python으로 Uvicorn 서버를 실행합니다.
 
 이미 생성된 가상환경은 재사용합니다. 최초 의존성 설치에는 패키지 다운로드를 위한 인터넷 연결이 필요합니다. `run.cmd`는 실행하는 PowerShell 프로세스에만 스크립트 실행 정책을 지정합니다.
 
@@ -44,24 +51,26 @@ VS Code에서는 **Ctrl+Shift+B**로 같은 실행 절차를 사용할 수 있�
 .\run.cmd -Port 8001
 ```
 
+브랜치를 바꾼 뒤 VS Code에서 `redis` 같은 패키지를 찾을 수 없다는 경고가 나오면 루트에서 `.\run.cmd -SetupOnly`를 실행해 `.venv`의 백엔드 의존성을 갱신하세요. 설치 후에도 경고가 남으면 **Python: Select Interpreter**에서 `.venv\Scripts\python.exe`를 선택하세요.
+
 - [Swagger](http://127.0.0.1:8000/docs)
+- [웹 화면](http://127.0.0.1:8000/app/)
 - [서버 상태 확인](http://127.0.0.1:8000/health)
 
 ## 프론트엔드 MVP
 
 현재·시간별 날씨를 확인하고 오늘과 주간의 베스트·워스트 옷차림을 비교할 수 있습니다. 저장된 지역이 없으면 서울특별시 중구를 표시합니다. 둘러보기 설정은 브라우저에 저장하고, 로그인한 사용자는 지역·체감 온도·스타일·활동·선호 의류·피할 의류를 계정에 저장할 수 있습니다.
 
-백엔드를 실행한 상태에서 별도 터미널로 아래 명령을 실행합니다.
+화면을 수정하면서 변경 사항을 바로 보려면 백엔드를 실행한 상태에서 별도 터미널로 아래 명령을 실행합니다.
 
 ```powershell
 cd frontend
-npm ci
 npm run dev
 ```
 
 [프론트엔드 개발 화면](http://127.0.0.1:5173/app/)
 
-`frontend`에서 `npm run build` 후 백엔드를 재시작하면 화면과 API를 같은 서버에서 사용할 수 있습니다. [통합 화면](http://127.0.0.1:8000/app/) · [프론트엔드 실행 안내](frontend/README.md)
+[프론트엔드 실행 안내](frontend/README.md)
 
 회원가입은 `/app/#signup`, 로그인은 `/app/#login`, 추천 프로필은 `/app/#profile`에서 제공합니다. 회원가입 뒤 프로필 설정으로 이동하며 언제든 나중에 설정할 수 있습니다. 계정 저장·인증 API와 기존 사용자 데이터의 호환 범위는 [사용자 기능 문서](backend/app/users/README.md)를 확인하세요.
 
@@ -180,7 +189,9 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `STUDY_SESSION_IDLE_SECONDS` | `1800` | 인증 요청이 없는 세션의 만료 시간(30분). 최대 유지 시간 이내로 설정 |
 | `STUDY_SESSION_COOKIE_SECURE` | `false` | 백엔드에 HTTP로 전달하는 HTTPS 프록시 환경에서 `true`로 설정. HTTPS 요청에는 자동 적용 |
 | `STUDY_WEATHER_TIMEOUT_SECONDS` | `10` | 외부 날씨 API 제한 시간(0.1~30초) |
-| `STUDY_WEATHER_CACHE_TTL_SECONDS` | `600` | 날씨 캐시 유지 시간(0~3600초, 0은 캐시 해제) |
+| `STUDY_WEATHER_CACHE_TTL_SECONDS` | `3600` | 예보를 최신으로 판단하는 시간(0~3600초, 0은 캐시 해제) |
+| `STUDY_WEATHER_REDIS_URL` | 미설정 | Redis 예보 캐시 연결 주소. 미설정 시 프로세스 메모리 캐시 사용 |
+| `STUDY_WEATHER_CACHE_STALE_MAX_SECONDS` | `10800` | 메모리·Redis 예보의 최대 재사용 시간. 최신 유효 시간 이상, 최대 86400초 |
 | `STUDY_LLM_BASE_URL` | `http://127.0.0.1:11434` | Ollama 서버의 기본 주소 |
 | `STUDY_LLM_MODEL` | 빈 문자열 | 직접 준비한 로컬 모델명 |
 | `STUDY_LLM_THINKING` | 미지정 | Ollama 추론 모드. `true`/`false`, 미지정은 서버 기본값. 지원하는 모델에서만 설정 |
@@ -213,7 +224,7 @@ DB 연결에는 Python 표준 라이브러리의 `sqlite3`를 사용합니다. `
 | 위치 | 역할 |
 | --- | --- |
 | `backend/main.py` | FastAPI 생성, 시작 시 테이블 초기화, 라우터 등록 |
-| `run.cmd` / `run.ps1` | 가상환경 생성·활성화, 의존성 설치, 서버·테스트 실행 |
+| `run.cmd` / `run.ps1` | 가상환경 준비, 백엔드·프런트엔드 의존성 설치, 화면 빌드, 서버·테스트 실행 |
 | `.vscode/tasks.json` / `.vscode/launch.json` | 환경 준비를 먼저 수행하는 실행·디버깅 설정 |
 | `backend/app/common/config.py` | 환경변수와 `.env` 설정 읽기 |
 | `backend/app/common/database.py` | DB 연결과 개발용 테이블 초기화 |

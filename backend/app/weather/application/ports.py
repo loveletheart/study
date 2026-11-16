@@ -1,11 +1,12 @@
 """외부 날씨·지역 조회에 필요한 인터페이스. 저장소 인터페이스와 구분한다."""
 
 # 표준 라이브러리
+from collections.abc import Callable
 from typing import Protocol
 
 # 프로젝트 모듈
 from app.weather.domain.models import Coordinates, Location, SigunguRegion, WeatherForecast
-from app.weather.application.dto import LocationSearchResult
+from app.weather.application.dto import ForecastResult, LocationSearchResult
 
 
 class LocationSearch(Protocol):
@@ -21,6 +22,12 @@ class WeatherProvider(Protocol):
 
     def get_forecast(self, coordinates: Coordinates) -> WeatherForecast:
         """날씨 예보 조회 인터페이스"""
+        ...
+
+
+class ForecastCache(Protocol):
+    def get_or_load(self, coordinates: Coordinates, load: Callable[[], WeatherForecast]) -> ForecastResult:
+        """예보와 갱신 결과를 조회한다."""
         ...
 
 

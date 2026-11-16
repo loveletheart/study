@@ -25,7 +25,7 @@ class Settings:
     app_name: str
     database_path: Path
     weather_timeout_seconds: float = 10.0
-    weather_cache_ttl_seconds: float = 600.0
+    weather_cache_ttl_seconds: float = 3600.0
     llm_base_url: str = "http://127.0.0.1:11434"
     llm_model: str = ""
     llm_timeout_seconds: float = 180.0
@@ -51,6 +51,8 @@ class Settings:
     session_max_age_seconds: int = DEFAULT_SESSION_MAX_AGE_SECONDS
     session_idle_seconds: int = DEFAULT_SESSION_IDLE_SECONDS
     outfit_weather_refresh_workers: int = 4
+    weather_redis_url: str = field(default="", repr=False)
+    weather_cache_stale_max_seconds: float = 10800.0
 
 
 # 설정값 검증
@@ -115,11 +117,16 @@ def get_settings() -> Settings:
     session_idle = _integer_setting(
         values, "STUDY_SESSION_IDLE_SECONDS", min(DEFAULT_SESSION_IDLE_SECONDS, session_max_age), 1, session_max_age,
     )
+    weather_cache_ttl = _number_setting(values, "STUDY_WEATHER_CACHE_TTL_SECONDS", 3600, 0, 3600)
     return Settings(
         app_name=values.get("STUDY_APP_NAME") or "Study API",
         database_path=database_path,
         weather_timeout_seconds=_number_setting(values, "STUDY_WEATHER_TIMEOUT_SECONDS", 10, 0.1, 30),
-        weather_cache_ttl_seconds=_number_setting(values, "STUDY_WEATHER_CACHE_TTL_SECONDS", 600, 0, 3600),
+        weather_cache_ttl_seconds=weather_cache_ttl,
+        weather_redis_url=(values.get("STUDY_WEATHER_REDIS_URL") or "").strip(),
+        weather_cache_stale_max_seconds=_number_setting(
+            values, "STUDY_WEATHER_CACHE_STALE_MAX_SECONDS", 10800, max(1, weather_cache_ttl), 86400,
+        ),
         llm_base_url=_llm_base_url((values.get("STUDY_LLM_BASE_URL") or "http://127.0.0.1:11434").strip()),
         llm_model=(values.get("STUDY_LLM_MODEL") or "").strip(),
         llm_timeout_seconds=_number_setting(values, "STUDY_LLM_TIMEOUT_SECONDS", 180, 1, 600),

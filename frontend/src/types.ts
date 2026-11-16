@@ -57,6 +57,7 @@ export interface HourlyWeather {
 }
 export interface WeatherResult {
   fetched_at: string
+  is_stale?: boolean
   source_url: string
   provider: string
   current?: CurrentWeather

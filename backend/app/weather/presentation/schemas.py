@@ -5,7 +5,7 @@ from datetime import date as Date, datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 # 프로젝트 모듈
-from app.weather.application.dto import TodayWeatherResult
+from app.weather.application.dto import ForecastResult, TodayWeatherResult
 
 
 class AttributeModel(BaseModel):
@@ -103,6 +103,7 @@ class ForecastMetadata(AttributeModel):
     coordinates: CoordinatesResponse = Field(description="요청한 좌표. 실제 예보 격자 중심 좌표와 다를 수 있습니다.")
     timezone: str = Field(description="예보 날짜를 해석하는 시간대. 현재 Asia/Seoul로 고정")
     fetched_at: datetime = Field(description="우리 서버가 데이터를 가져온 시각. 예보 발표 시각과 다릅니다.")
+    is_stale: bool = Field(default=False, description="갱신 장애로 이전 정상 예보를 반환했는지 여부")
     provider: str = Field(description="날씨 데이터 제공사")
     source_url: str = Field(description="화면 출처 표시에 사용할 제공사 링크")
     units: WeatherUnits = Field(default_factory=WeatherUnits, description="응답 수치의 단위")
@@ -123,6 +124,7 @@ class TodayWeatherResponse(ForecastMetadata):
             "coordinates": forecast.coordinates,
             "timezone": forecast.timezone,
             "fetched_at": forecast.fetched_at,
+            "is_stale": result.is_stale,
             "provider": forecast.provider,
             "source_url": forecast.source_url,
             "current": forecast.current,
@@ -136,3 +138,8 @@ class WeeklyWeatherResponse(ForecastMetadata):
     """오늘부터 7일 예보를 날짜순으로 제공하는 응답."""
 
     daily: list[DailyForecastResponse] = Field(min_length=7, max_length=7, description="오늘 포함 연속된 7일의 예보")
+
+    @classmethod
+    def from_result(cls, result: ForecastResult) -> "WeeklyWeatherResponse":
+        response = cls.model_validate(result.forecast)
+        return response.model_copy(update={"is_stale": result.is_stale})

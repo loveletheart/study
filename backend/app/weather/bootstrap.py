@@ -3,8 +3,10 @@ from functools import lru_cache
 
 # 프로젝트 모듈
 from app.common.config import get_settings
+from app.weather.application.ports import ForecastCache
 from app.weather.application.services import WeatherService
 from app.weather.infrastructure.cache import TTLCache
+from app.weather.infrastructure.forecast_cache import MemoryForecastCache
 from app.weather.infrastructure.http_client import JsonHttpClient
 from app.weather.infrastructure.open_meteo import OpenMeteoProvider
 from app.weather.infrastructure.location_catalog import SQLiteLocationCatalog, SQLiteLocationSearch
@@ -18,12 +20,50 @@ def get_weather_provider() -> OpenMeteoProvider:
     return OpenMeteoProvider(
         http=JsonHttpClient(settings.weather_timeout_seconds),
         cache=TTLCache(settings.weather_cache_ttl_seconds),
+        cache_forecasts=False,
+    )
+
+
+@lru_cache
+def get_forecast_cache() -> ForecastCache | None:
+    """서버에서 공유할 Redis 또는 메모리 예보 캐시를 구성한다."""
+    settings = get_settings()
+    if settings.weather_cache_ttl_seconds == 0:
+        return None
+    if not settings.weather_redis_url:
+        return MemoryForecastCache(
+            freshness_seconds=settings.weather_cache_ttl_seconds,
+            max_age_seconds=settings.weather_cache_stale_max_seconds,
+        )
+
+    from redis import Redis
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
+
+    from app.weather.infrastructure.redis_cache import RedisForecastCache
+
+    client = Redis.from_url(
+        settings.weather_redis_url,
+        socket_connect_timeout=1,
+        socket_timeout=1,
+        retry=Retry(NoBackoff(), 0),
+    )
+    return RedisForecastCache(
+        client,
+        freshness_seconds=settings.weather_cache_ttl_seconds,
+        max_age_seconds=settings.weather_cache_stale_max_seconds,
+        weather_timeout_seconds=settings.weather_timeout_seconds,
     )
 
 
 def get_weather_service() -> WeatherService:
     """날씨 제공사와 서비스 연결"""
-    return WeatherService(get_weather_provider(), get_location_catalog(), get_location_search())
+    return WeatherService(
+        get_weather_provider(),
+        get_location_catalog(),
+        get_location_search(),
+        forecast_cache=get_forecast_cache(),
+    )
 
 
 @lru_cache
