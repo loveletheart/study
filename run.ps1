@@ -57,12 +57,59 @@ function Find-BootstrapPython {
     throw 'Python 3.11+ was not found. Install Python or pass -Python with its executable path.'
 }
 
+function Initialize-Frontend([string]$FrontendDirectory) {
+    Push-Location -LiteralPath $FrontendDirectory
+    try {
+        $packageFiles = Get-Item -LiteralPath 'package.json', 'package-lock.json'
+        $installedLock = Get-Item -LiteralPath 'node_modules/.package-lock.json' -ErrorAction SilentlyContinue
+        $needsInstall = -not $installedLock -or
+            -not (Test-Path -LiteralPath 'node_modules/vite/client.d.ts' -PathType Leaf) -or
+            -not (Test-Path -LiteralPath 'node_modules/.bin/vue-tsc.cmd' -PathType Leaf) -or
+            ($packageFiles | Where-Object { $_.LastWriteTimeUtc -gt $installedLock.LastWriteTimeUtc })
+
+        $builtIndex = Get-Item -LiteralPath 'dist/index.html' -ErrorAction SilentlyContinue
+        if (-not $needsInstall -and $builtIndex -and (Test-Path -LiteralPath 'dist/assets' -PathType Container)) {
+            $buildInputs = @(
+                $installedLock
+                Get-Item -LiteralPath 'index.html', 'tsconfig.json', 'vite.config.js', 'src', 'public'
+                Get-ChildItem -LiteralPath 'src', 'public' -Recurse
+            )
+            if (-not ($buildInputs | Where-Object { $_.LastWriteTimeUtc -gt $builtIndex.LastWriteTimeUtc })) {
+                Write-Host '[setup] Frontend is up to date.'
+                return
+            }
+        }
+
+        $npm = Get-Command npm.cmd -CommandType Application -ErrorAction SilentlyContinue
+        if (-not $npm) {
+            throw 'Frontend setup requires Node.js 20.19+ (20.x) or 22.12+ with npm on PATH.'
+        }
+        if ($needsInstall) {
+            Write-Host '[setup] Installing frontend dependencies...'
+            & $npm.Source ci --include=dev --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Frontend dependency installation failed. The application was not started.'
+            }
+        }
+
+        Write-Host '[setup] Building frontend...'
+        & $npm.Source run build
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Frontend build failed. The application was not started.'
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 Push-Location $PSScriptRoot
 try {
     $venvDirectory = Join-Path $PSScriptRoot '.venv'
     $venvPython = Join-Path $venvDirectory 'Scripts\python.exe'
     $activateScript = Join-Path $venvDirectory 'Scripts\Activate.ps1'
     $backendDirectory = Join-Path $PSScriptRoot 'backend'
+    $frontendDirectory = Join-Path $PSScriptRoot 'frontend'
     $requirements = Join-Path $backendDirectory 'requirements.txt'
 
     if (-not (Test-Path -LiteralPath $requirements)) {
@@ -105,6 +152,10 @@ try {
     & $venvPython -m pip install --disable-pip-version-check -r $requirements
     if ($LASTEXITCODE -ne 0) {
         throw 'Dependency installation failed. The application was not started.'
+    }
+
+    if (-not $Test -and (Test-Path -LiteralPath (Join-Path $frontendDirectory 'package.json') -PathType Leaf)) {
+        Initialize-Frontend $frontendDirectory
     }
 
     if ($SetupOnly) {

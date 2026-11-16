@@ -556,6 +556,9 @@ async function choosePreferences(value: Preferences) {
                   <button class="secondary-button" @click="loadWeather">다시 시도</button>
                 </div>
                 <template v-else-if="dayWeather">
+                  <p v-if="weather?.is_stale" class="inline-notice" role="status">
+                    {{ timeLabel(weather.fetched_at) }}에 조회한 이전 예보를 표시하고 있어요.
+                  </p>
                   <div class="weather-location">
                     <AppIcon name="pin" :size="15" />{{ location.name
                     }}<span>{{ dateLabel(dayWeather.date) }}</span>

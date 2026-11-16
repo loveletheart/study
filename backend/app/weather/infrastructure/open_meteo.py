@@ -101,10 +101,12 @@ class OpenMeteoProvider:
         http: JsonHttpClient,
         cache: TTLCache,
         clock: Callable[[], datetime] | None = None,
+        *, cache_forecasts: bool = True,
     ) -> None:
         """HTTP 클라이언트와 캐시 주입"""
         self._http = http
         self._cache = cache
+        self._cache_forecasts = cache_forecasts
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def search_locations(self, query: str, limit: int) -> tuple[Location, ...]:
@@ -146,6 +148,8 @@ class OpenMeteoProvider:
 
     def get_forecast(self, coordinates: Coordinates) -> WeatherForecast:
         """좌표·날짜별 예보 캐시 조회"""
+        if not self._cache_forecasts:
+            return self._load_forecast(coordinates)
         # 한국 시간 자정 이후 어제 예보를 반환하지 않도록 날짜를 캐시 키에 포함한다.
         today = self._clock().astimezone(KST).date()
         return self._cache.get_or_load(

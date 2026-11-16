@@ -6,17 +6,18 @@ Vue 3와 TypeScript로 만든 날씨·옷차림 MVP 화면입니다. 지역 검�
 
 Node.js 20.19 이상(20.x) 또는 22.12 이상이 필요합니다. 현재 PC의 Node.js 24.11에서도 실행·빌드할 수 있는 Vite 7을 사용합니다.
 
-먼저 프로젝트 루트에서 백엔드를 실행합니다.
+프로젝트 루트에서 아래 명령을 실행하면 프런트엔드 의존성을 설치하고 필요한 경우 빌드한 뒤 FastAPI를 시작합니다.
 
 ```powershell
 .\run.cmd
 ```
 
-별도 터미널에서 프론트엔드를 실행합니다.
+화면과 API를 같은 서버에서 사용하는 주소는 **http://127.0.0.1:8000/app/** 입니다.
+
+화면 변경을 즉시 반영하는 개발 서버는 별도 터미널에서 실행합니다.
 
 ```powershell
 cd frontend
-npm ci
 npm run dev
 ```
 
@@ -31,17 +32,15 @@ npm run dev
 
 서버의 VWorld·LLM 비밀 설정은 프로젝트 루트 `.env`에서 관리합니다. API 키를 프론트엔드나 `VITE_` 환경변수에 넣지 않습니다. 개발 서버는 로컬 컴퓨터에서만 열립니다.
 
-## 백엔드 하나로 화면 제공
+## 프런트엔드만 빌드
 
 ```powershell
 cd frontend
 npm ci
 npm run build
-cd ..
-.\run.cmd
 ```
 
-빌드 후 백엔드를 시작하거나 재시작하면 **http://127.0.0.1:8000/app/** 에서 화면을 제공합니다. Node.js는 빌드에만 필요합니다. 기존 `/`, `/health`, `/docs`, `/api/v1/*` 경로는 유지합니다. `frontend/dist`는 Git에 포함하지 않으므로 새로 받은 PC에서도 빌드가 필요합니다.
+빌드 결과는 `frontend/dist`에 저장됩니다. `npm run build`는 타입 검사도 실행합니다.
 
 `npm run preview`는 빌드 결과를 http://127.0.0.1:4173/app/ 에서 로컬 확인합니다. 배포용 서버가 아닙니다.
 

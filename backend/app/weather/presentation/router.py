@@ -70,5 +70,5 @@ def get_today(latitude: Latitude, longitude: Longitude, service: WeatherServiceD
 )
 def get_weekly(latitude: Latitude, longitude: Longitude, service: WeatherServiceDependency) -> ApiResponse[WeeklyWeatherResponse]:
     """오늘부터 7일 예보 조회"""
-    result = service.get_weekly(latitude, longitude)
-    return ApiResponse(data=WeeklyWeatherResponse.model_validate(result))
+    result = service.get_weekly_result(latitude, longitude)
+    return ApiResponse(data=WeeklyWeatherResponse.from_result(result))

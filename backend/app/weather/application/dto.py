@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 
 # 프로젝트 모듈
+from app.weather.application.exceptions import WeatherError
 from app.weather.domain.models import DailyForecast, HourlyForecast, Location, WeatherForecast
 
 
@@ -16,8 +17,19 @@ class LocationSearchResult:
 
 
 @dataclass(frozen=True)
+class ForecastResult:
+    forecast: WeatherForecast
+    refresh_error: WeatherError | None = None
+
+    @property
+    def is_stale(self) -> bool:
+        return self.refresh_error is not None
+
+
+@dataclass(frozen=True)
 class TodayWeatherResult:
     forecast: WeatherForecast
     today: DailyForecast
     hourly: tuple[HourlyForecast, ...]
     summary: str
+    is_stale: bool = False

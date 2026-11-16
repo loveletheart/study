@@ -28,6 +28,23 @@ test('첫 방문에는 서울특별시 중구의 날씨와 옷차림을 불러�
   expect(await page.evaluate(() => localStorage.getItem('ondo.settings.v1'))).toBeNull()
 })
 
+test('이전 예보와 실제 조회 시각을 표시하고 정상 갱신 후 안내를 숨긴다', async ({ page }) => {
+  await mockApi(page)
+  let stale = true
+  await page.route('**/weather/today?**', (route) =>
+    route.fulfill({ json: success({ ...weather, is_stale: stale }) }),
+  )
+  await page.goto('./')
+  const notice = page.getByText('10:00에 조회한 이전 예보를 표시하고 있어요.')
+  await expect(notice).toBeVisible()
+  await expect(page.locator('.current-temperature')).toHaveText('17°')
+
+  stale = false
+  await page.getByRole('button', { name: '날씨 다시 불러오기' }).click()
+  await expect(page.locator('.current-temperature')).toHaveText('17°')
+  await expect(notice).not.toBeVisible()
+})
+
 test('기본 지역 조회에 실패해도 지역을 직접 선택할 수 있다', async ({ page }) => {
   await mockApi(page)
   await page.route('**/weather/locations?**', (route) =>

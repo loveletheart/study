@@ -54,7 +54,8 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/weather/weekly?latitude=37.5665&
 | --- | --- |
 | `coordinates` | 사용자가 요청한 좌표. 제공사의 실제 예보 격자 중심과 다를 수 있음 |
 | `timezone` | `Asia/Seoul`. 국내 서비스이므로 모든 날짜를 한국 시간으로 해석 |
-| `fetched_at` | 우리 서버가 응답을 받아온 시각. 제공사의 예보 발표 시각과 다름 |
+| `fetched_at` | 우리 서버가 응답을 받아온 시각. 이전 예보를 사용해도 원래 값 유지 |
+| `is_stale` | 외부 예보 갱신 장애로 마지막 정상 예보를 제공했으면 `true` |
 | `provider`, `source_url` | 데이터 출처. 화면에도 Open-Meteo 출처 링크 표시 필요 |
 | `units` | 기온 °C, 풍속 m/s, 강수량 mm, 적설량 cm, 강수확률 % |
 | `current.time` | 모델 기반 현재 날씨의 기준 시각. 관측소 실측값을 뜻하지 않음 |
@@ -70,10 +71,18 @@ Invoke-RestMethod "http://127.0.0.1:8000/api/v1/weather/weekly?latitude=37.5665&
 
 원본 자료의 갱신은 다운로드 스크립트로 명시적으로 수행합니다. 서버는 같은 버전의 DB 색인을 재사용하고 자료 버전이 바뀌면 검색 색인만 교체합니다. 기존 사용자 프로필·위치 저장·추천 결과는 삭제하지 않습니다. GeoNames 행정코드는 검색 계층 구분에만 쓰며 공식 VWorld 시군구 코드로 간주하지 않습니다.
 
-- 날씨의 기본 TTL은 600초입니다. 오늘과 주간 조회가 같은 좌표의 7일 예보를 공유합니다.
-- 한국 시간 날짜를 캐시 키에 포함하므로 자정이 지나면 새 날짜의 예보를 조회합니다.
-- 서버 프로세스별 메모리 캐시이며 재시작 시 비워집니다. 만료 데이터나 실패 응답은 정상 날씨로 반환하지 않습니다.
-- `STUDY_WEATHER_CACHE_TTL_SECONDS=0`이면 캐시를 사용하지 않습니다.
+Redis를 실행한 뒤 프로젝트 루트의 `.env`에 설정합니다.
+
+```dotenv
+STUDY_WEATHER_REDIS_URL=redis://127.0.0.1:6379/0
+STUDY_WEATHER_CACHE_TTL_SECONDS=3600
+STUDY_WEATHER_CACHE_STALE_MAX_SECONDS=10800
+```
+
+- 오늘·주간 날씨와 대표 좌표가 같은 시군구 추천은 제공사·좌표·한국 날짜로 구분한 7일 예보를 공유합니다. Redis URL이 없으면 프로세스 메모리 캐시를 사용하고, `STUDY_WEATHER_CACHE_TTL_SECONDS=0`이면 두 캐시 모두 비활성화합니다.
+- 조회 후 기본 1시간까지 최신으로 사용하고 Redis에는 최대 3시간 보관합니다. 같은 키의 갱신은 Redis 잠금으로 조율합니다. 제공사 오류는 5초 동안 공유해 동시 요청이 갱신을 반복하지 않게 합니다.
+- 시간 초과, 연결 장애, 요청 한도 초과 시 같은 한국 날짜의 보관 중인 마지막 정상 예보를 날씨 화면에 반환할 수 있습니다. 잘못된 데이터나 날짜에는 기존 오류를 반환합니다. 옷차림 갱신은 이전 예보를 갱신 성공으로 기록하지 않습니다.
+- Redis 연결과 명령의 대기 제한은 각 1초입니다. 캐시 조회에 실패하면 Redis 명령을 재시도하지 않고 Open-Meteo에 직접 요청합니다. FastAPI 재시작 후에도 Redis에 남은 예보를 사용합니다. Redis 재시작까지 보존하려면 Redis의 영속화 옵션을 설정합니다. ([Redis 영속화 안내](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/))
 - HTTP 요청은 기본 10초 타임아웃과 1MiB 응답 크기 제한을 사용합니다.
 
 | 상태 | 의미 |
