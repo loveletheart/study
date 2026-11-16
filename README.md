@@ -4,6 +4,10 @@
 
 Python 백엔드는 `backend/`, Vue 프론트엔드는 `frontend/`에 있습니다. 백엔드는 사용자, 날씨, 옷차림 업무를 구분하고 각 업무를 `presentation`, `application`, `domain`, `infrastructure` 계층으로 구성합니다.
 
+## 프로젝트 문서
+
+[온도 프로젝트 명세](docs/project-spec.md)에서 기능, API, 데이터 구조, 운영 정책과 설계를 확인할 수 있습니다. GitHub에서 로그인 없이 읽을 수 있습니다.
+
 ## 기술 선택 이유
 
 ### FastAPI를 선택한 이유
