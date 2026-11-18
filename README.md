@@ -123,7 +123,7 @@ npm run dev
 
 동네 공유 API는 먼저 `/api/v1/weather/locations`로 지역을 검색한 뒤 응답의 `id`를 `location_id`로 전달합니다. 검색 좌표를 브이월드의 공식 시군구 경계에 조회하고, 같은 `sig_cd`에 속한 위치는 고정 대표점의 기본 추천을 공유합니다. 이름이나 좌표 반올림으로 구역을 추정하지 않습니다. 이를 위해 로컬 `.env`에 `VWORLD_API_KEY`와 발급 시 등록한 도메인인 `STUDY_VWORLD_DOMAIN`을 설정합니다. 키가 없고 저장된 판정도 없으면 `WEATHER_REGION_NOT_CONFIGURED`(503)를 반환합니다.
 
-`cold_sensitivity=normal|cold|warm`, `style=default|casual|formal`, `activity=daily|outdoor|active` 옵션은 기본 추천과 별개로 LLM이 의류와 자연어 설명을 생성하며 같은 조건 조합은 재사용합니다. 오늘의 최근 조건은 공통 갱신 10분 전부터 준비하고 최초 조합은 요청 시 생성합니다. 주간의 새 조건은 등록만 하고 다음 새벽 배치에서 생성합니다. 10분이나 새벽 1~2시 안에 모든 생성이 완료되는 것을 보장하지 않습니다.
+`cold_sensitivity=normal|cold|warm`, `style=default|casual|formal`, `activity=daily|outdoor|active` 옵션은 기본 추천과 별개로 LLM이 의류와 자연어 설명을 생성하며 같은 조건 조합은 재사용합니다. 오늘의 최근 조건은 공통 갱신 10분 전부터 준비하고 최초 조합은 요청 시 생성합니다. 주간의 새 조건은 등록만 하고 다음 새벽 배치에서 생성합니다. 주간 배치는 한국 시간 01:00부터 당일 작업을 확인하고, 서버가 늦게 켜지거나 배치가 중단되면 남은 작업을 이어서 처리합니다.
 
 Gemini 자동 전환은 기본적으로 꺼져 있습니다. 사용하려면 `.env`에 다음 값을 설정하고 서버를 재시작합니다. API 키는 Git에 올리지 않습니다.
 
@@ -206,7 +206,7 @@ Swagger 첫 화면에는 전체 오류 코드 표가 표시됩니다. 각 API를
 | `STUDY_OUTFIT_REFRESH_SECONDS` | `3600` | 조회한 지역의 추천 갱신 간격(60~86400초). 서버 실행 중 동작 |
 | `STUDY_OUTFIT_WEATHER_REFRESH_WORKERS` | `4` | 시간별 시군구 예보 갱신의 최대 동시 요청 수(1~16) |
 | `STUDY_OUTFIT_CACHE_MAX_ENTRIES` | `4096` | 공통 추천 보관 조합 수(1~100000). 지역·오늘/주간·모델 설정 조합 기준 |
-| `STUDY_OUTFIT_WEEKLY_BATCH_HOUR` | `1` | 한국 시간 주간 배치 시작 시간대(0~23). 기본 01:00~02:00 사이 하루 한 번 시작 |
+| `STUDY_OUTFIT_WEEKLY_BATCH_HOUR` | `1` | 한국 시간 주간 배치 예약 시각(0~23). 기본 01:00부터 당일 배치 시작 |
 | `STUDY_OUTFIT_WEEKLY_MAX_AGE_SECONDS` | `172800` | 주간 이전 정상 배치 결과의 최대 보관 시간(기본 48시간, 범위 1~7일) |
 | `VWORLD_API_KEY` | 빈 문자열 | 브이월드 시군구 공식 경계 조회 키. 로컬 설정에만 저장 |
 | `STUDY_VWORLD_DOMAIN` | 빈 문자열 | 브이월드 키 발급 시 등록한 이용 도메인. 예: `http://localhost:8000` |

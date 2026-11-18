@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import ExitStack, closing
 from datetime import datetime
 from pathlib import Path
+from sqlite3 import Connection, OperationalError
 from threading import Event, Lock
 from time import perf_counter
 from weakref import WeakValueDictionary
@@ -31,15 +32,32 @@ from app.outfits.application.dto import (
     PersonalizedOutfits,
 )
 from app.outfits.application.exceptions import (
+    OutfitCloudRateLimitError,
+    OutfitCloudTimeoutError,
+    OutfitCloudUnavailableError,
     OutfitForecastError,
-    WeeklyOutfitNotReadyError,
     OutfitLlmResponseError,
+    OutfitLlmTimeoutError,
+    OutfitLlmUnavailableError,
+    WeeklyOutfitNotReadyError,
 )
 from app.outfits.application.services import OutfitService
 from app.weather.domain.models import KST
 from app.outfits.application.ports import OutfitPersonalizer
 from app.outfits.domain.models import OutfitPreferences
 from app.weather.application.ports import LocationReader
+from app.weather.application.exceptions import (
+    WeatherProviderTimeoutError,
+    WeatherProviderUnavailableError,
+    WeatherRateLimitError,
+)
+from app.outfits.infrastructure.weekly_batch import (
+    CacheKey,
+    WeeklyBatchLeaseLostError,
+    WeeklyBatchRun,
+    WeeklyBatchStore,
+    WeeklyBatchTarget,
+)
 
 
 # 로그
@@ -48,7 +66,12 @@ logger = logging.getLogger(__name__)
 
 # 캐시 키와 결과 타입
 OutfitResult = TodayOutfitResult | WeeklyOutfitResult
-CacheKey = tuple[str, str, float, float]
+WEEKLY_RETRYABLE_ERRORS = (
+    OutfitLlmTimeoutError, OutfitLlmUnavailableError,
+    OutfitCloudTimeoutError, OutfitCloudUnavailableError, OutfitCloudRateLimitError,
+    WeatherProviderTimeoutError, WeatherProviderUnavailableError, WeatherRateLimitError,
+    OperationalError,
+)
 
 
 # JSON 변환·검증
@@ -126,11 +149,7 @@ class CachedOutfitService:
                 )
             if "prepared_for" not in columns:
                 connection.execute("ALTER TABLE outfit_result_cache ADD COLUMN prepared_for REAL NOT NULL DEFAULT 0")
-            connection.execute(
-                "CREATE TABLE IF NOT EXISTS outfit_weekly_batch_runs "
-                "(scope TEXT NOT NULL, run_date TEXT NOT NULL, started_at REAL NOT NULL, finished_at REAL, "
-                "status TEXT NOT NULL, PRIMARY KEY(scope, run_date))",
-            )
+        self._weekly_batch = WeeklyBatchStore(database_path, scope, self._clock)
 
     def get_today(self, latitude: float, longitude: float) -> TodayOutfitResult:
         """오늘 추천을 재사용하고 저장된 결과가 없을 때만 생성한다."""
@@ -224,6 +243,7 @@ class CachedOutfitService:
     def _generate(
         self, key: CacheKey, record_attempt: bool = True,
         *, loaded: tuple[OutfitService, OutfitForecast] | None = None,
+        on_saved: Callable[[Connection], None] | None = None,
     ) -> OutfitResult:
         """시도 시각을 기록하고 성공한 결과만 원자적으로 교체"""
         if record_attempt:
@@ -261,11 +281,15 @@ class CachedOutfitService:
             raise OutfitForecastError()
         payload = _dump_result(result)
         with closing(connect_database(self._database_path)) as connection, connection:
-            connection.execute(
+            saved = connection.execute(
                 "UPDATE outfit_result_cache SET payload=?, updated_at=? "
                 "WHERE scope=? AND kind=? AND latitude=? AND longitude=?",
                 (payload, self._clock().timestamp(), *key),
-            )
+            ).rowcount
+            if on_saved is not None:
+                if not saved:
+                    raise OutfitForecastError()
+                on_saved(connection)
         return result
 
     def prepare_region(
@@ -429,86 +453,105 @@ class CachedOutfitService:
             logger.warning("옷차림 사전 갱신 실패: kind=%s, cause=%s", key[1], type(exc).__name__)
 
     def run_weekly_batch(self, stopped: Event | None = None, on_ready=None, force: bool = False) -> dict:
-        """한국 시간 지정된 한 시간 안에 하루 한 번 시작하고 요청 경로와 분리해 주간 생성"""
+        """예약 시간이 지난 뒤 당일 배치의 미완료 대상을 처리한다."""
         now = self._clock().astimezone(KST)
-        if not force and now.hour != self._weekly_batch_hour:
+        if not force and now.hour < self._weekly_batch_hour:
             return {"status": "not_due", "generated": 0, "failed": 0}
-        run_date = now.date().isoformat()
-        with closing(connect_database(self._database_path)) as connection, connection:
-            claimed = connection.execute(
-                "INSERT OR IGNORE INTO outfit_weekly_batch_runs (scope, run_date, started_at, status) VALUES (?, ?, ?, 'running')",
-                (self._scope, run_date, now.timestamp()),
-            ).rowcount
-        if not claimed:
-            return {"status": "already_run", "generated": 0, "failed": 0}
+
+        status, run, targets = self._weekly_batch.claim(now)
+        if run is None:
+            return {"status": status, "generated": 0, "failed": 0}
+
         started = perf_counter()
-        logger.info("주간 추천 배치 시작: run_date=%s", run_date)
+        logger.info("주간 추천 배치 시작: run_date=%s, targets=%s", run.date, len(targets))
         generated, failed, personalized_generated = 0, 0, 0
-        status = "completed"
+        interrupted = False
         try:
-            with closing(connect_database(self._database_path)) as connection:
-                rows = connection.execute(
-                    "SELECT kind, latitude, longitude, requested_at FROM outfit_result_cache "
-                    "WHERE scope=? AND requested_at>=? ORDER BY requested_at DESC",
-                    (self._scope, now.timestamp() - 86400),
-                ).fetchall()
-            targets = {}
-            for row in rows:
-                prefix = row["kind"].rsplit(":", 1)
-                kind = prefix[0] + ":weekly" if len(prefix) == 2 else "weekly"
-                key = self._key(kind, row["latitude"], row["longitude"])
-                targets.setdefault(key, row["requested_at"])
-            for key, requested_at in targets.items():
-                if stopped is not None and stopped.is_set():
-                    status = "stopped"
-                    break
-                try:
-                    with self._lock_for(key):
-                        with closing(connect_database(self._database_path)) as connection, connection:
-                            connection.execute(
-                                "INSERT INTO outfit_result_cache (scope, kind, latitude, longitude, requested_at) "
-                                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(scope, kind, latitude, longitude) "
-                                "DO UPDATE SET requested_at=MAX(requested_at, excluded.requested_at)", (*key, requested_at),
-                            )
-                            connection.execute(
-                                "DELETE FROM outfit_result_cache WHERE rowid NOT IN "
-                                "(SELECT rowid FROM outfit_result_cache ORDER BY requested_at DESC, rowid DESC LIMIT ?)",
-                                (self._max_entries,),
-                            )
-                            present = connection.execute(
-                                "SELECT 1 FROM outfit_result_cache WHERE scope=? AND kind=? AND latitude=? AND longitude=?", key,
-                            ).fetchone()
-                        if present is None:
-                            continue
-                        result = self._generate(key)
-                    generated += 1
-                    if on_ready is not None:
-                        personal = on_ready(key, result, stopped)
-                        if personal:
-                            failed += personal["failed"]
-                            personalized_generated += personal["generated"]
-                except Exception as exc:
-                    failed += 1
-                    logger.warning("주간 배치 항목 실패: kind=%s, cause=%s", key[1], type(exc).__name__)
-        except Exception:
-            status = "failed"
-            raise
-        finally:
-            if failed and status == "completed":
-                status = "partial_failure"
-            with closing(connect_database(self._database_path)) as connection, connection:
-                connection.execute(
-                    "UPDATE outfit_weekly_batch_runs SET status=?, finished_at=? WHERE scope=? AND run_date=?",
-                    (status, self._clock().timestamp(), self._scope, run_date),
-                )
-            logger.info(
-                "주간 추천 배치 종료: status=%s, common=%s, personal=%s, failed=%s, elapsed_seconds=%.2f",
-                status, generated, personalized_generated, failed, perf_counter() - started,
-            )
+            with self._weekly_batch.maintain_lease(run) as lease_lost:
+                for target in targets:
+                    if lease_lost.is_set():
+                        raise WeeklyBatchLeaseLostError()
+                    if (
+                        (stopped is not None and stopped.is_set())
+                        or self._clock().astimezone(KST).date().isoformat() != run.date
+                    ):
+                        interrupted = True
+                        break
+                    try:
+                        with self._lock_for(target.key):
+                            result, created = self._prepare_weekly_common(run, target)
+                        generated += int(created)
+                        if lease_lost.is_set():
+                            raise WeeklyBatchLeaseLostError()
+                        personal = on_ready(target.key, result, stopped) if on_ready is not None else None
+                    except WeeklyBatchLeaseLostError:
+                        raise
+                    except Exception as exc:
+                        failed += 1
+                        self._weekly_batch.record(run, target, failed=True, retryable=isinstance(exc, WEEKLY_RETRYABLE_ERRORS))
+                        logger.warning("주간 배치 항목 실패: kind=%s, cause=%s", target.key[1], type(exc).__name__)
+                        continue
+
+                    if personal:
+                        failed += personal["failed"]
+                        personalized_generated += personal["generated"]
+                    if stopped is not None and stopped.is_set():
+                        interrupted = True
+                        break
+                    self._weekly_batch.record(
+                        run, target, failed=bool(personal and personal["failed"]),
+                        retryable=bool(personal and personal.get("retryable_failed", personal["failed"])),
+                    )
+            status = self._weekly_batch.finish(run, stopped=interrupted)
+        except WeeklyBatchLeaseLostError:
+            status = "lease_lost"
+
+        elapsed = perf_counter() - started
+        logger.info(
+            "주간 추천 배치 종료: status=%s, common=%s, personal=%s, failed=%s, elapsed_seconds=%.2f",
+            status, generated, personalized_generated, failed, elapsed,
+        )
         return {
             "status": status, "generated": generated, "personalized_generated": personalized_generated,
-            "failed": failed, "elapsed_seconds": perf_counter() - started,
+            "failed": failed, "elapsed_seconds": elapsed,
         }
+
+    def _prepare_weekly_common(
+        self, run: WeeklyBatchRun, target: WeeklyBatchTarget,
+    ) -> tuple[WeeklyOutfitResult, bool]:
+        key = target.key
+        if target.common_ready:
+            existing = self._read(key)
+            if isinstance(existing, WeeklyOutfitResult) and existing.forecast.today.isoformat() == run.date:
+                return existing, False
+            raise OutfitForecastError()
+
+        with closing(connect_database(self._database_path)) as connection, connection:
+            connection.execute(
+                "INSERT INTO outfit_result_cache (scope, kind, latitude, longitude, requested_at) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(scope, kind, latitude, longitude) "
+                "DO UPDATE SET requested_at=MAX(requested_at, excluded.requested_at)", (*key, target.requested_at),
+            )
+            connection.execute(
+                "DELETE FROM outfit_result_cache WHERE rowid NOT IN "
+                "(SELECT rowid FROM outfit_result_cache ORDER BY requested_at DESC, rowid DESC LIMIT ?)",
+                (self._max_entries,),
+            )
+            present = connection.execute(
+                "SELECT 1 FROM outfit_result_cache WHERE scope=? AND kind=? AND latitude=? AND longitude=?", key,
+            ).fetchone()
+        if present is None:
+            raise OutfitForecastError()
+
+        def mark_ready(connection: Connection) -> None:
+            if self._clock().astimezone(KST).date().isoformat() != run.date:
+                raise OutfitForecastError()
+            self._weekly_batch.mark_common_ready(connection, run, key)
+
+        result = self._generate(key, on_saved=mark_ready)
+        if not isinstance(result, WeeklyOutfitResult):
+            raise OutfitForecastError()
+        return result, True
 
 
 # 개인화 추천 캐시
@@ -665,17 +708,18 @@ class SQLitePersonalizedOutfitCache:
                 "WHERE scope=? AND location_id=? AND kind='weekly' AND requested_at>=? ORDER BY requested_at DESC",
                 (self._scope, region_id, self._clock().timestamp() - 86400),
             ).fetchall()
-        generated, failed = 0, 0
+        generated, failed, retryable_failed = 0, 0, 0
         for target in targets:
             if stopped is not None and stopped.is_set():
                 break
             try:
-                self.get(
+                _, cached = self.get(
                     region_id, "weekly", base, PREFERENCES_ADAPTER.validate_json(target["preferences"]),
                     register=False, from_weekly_batch=True,
                 )
-                generated += 1
+                generated += int(not cached)
             except Exception as exc:
                 failed += 1
+                retryable_failed += int(isinstance(exc, WEEKLY_RETRYABLE_ERRORS))
                 logger.warning("주간 개인 맞춤 배치 실패: cause=%s", type(exc).__name__)
-        return {"generated": generated, "failed": failed}
+        return {"generated": generated, "failed": failed, "retryable_failed": retryable_failed}

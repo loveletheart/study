@@ -54,7 +54,7 @@ SQLite 기본 경로는 루트의 `study.db`입니다. 데이터를 사용하는
 | --- | --- |
 | 계정 | `users`, `user_credentials`, `user_sessions`, `user_recommendation_profiles`, `auth_rate_limits`에 기본 정보, 비밀번호 해시, 세션, 개인 조건과 시도 제한 저장 |
 | 지역 | `weather_locations`, `weather_location_search`, `weather_location_search_version`에 검색 후보와 인덱스 저장. `weather_sigungu_points`, `weather_sigungu_regions`에 공식 판정과 대표점 저장 |
-| 추천 | `outfit_result_cache`에 공통 추천, `outfit_personal_results`와 `outfit_personal_targets`에 개인화 결과와 사전 생성 대상, `outfit_weekly_batch_runs`에 배치 실행 상태 저장 |
+| 추천 | `outfit_result_cache`에 공통 추천, `outfit_personal_results`와 `outfit_personal_targets`에 개인화 결과와 사전 생성 대상, `outfit_weekly_batch_runs`와 `outfit_weekly_batch_targets`에 당일 실행과 지역별 진행 상태 저장 |
 | 피드백 | `outfit_generations`에 실제 생성 입출력과 실패 유형, `outfit_feedback`에 신고와 수정안, `outfit_feedback_history`에 변경 이력 저장 |
 
 비밀번호는 계정별 무작위 솔트를 사용하는 scrypt 해시로 저장합니다. 세션용 무작위 토큰은 쿠키로 전달하고 DB에는 SHA-256 해시, 절대 만료 시각과 마지막 인증 활동 시각을 저장합니다. 구버전 세션의 마지막 활동 시각은 기존 7일 만료에서 발급 시각을 복원해 채웁니다. 기존 계정과 프로필은 보존합니다.
@@ -69,7 +69,7 @@ SQLite 기본 경로는 루트의 `study.db`입니다. 데이터를 사용하는
 | --- | --- |
 | 오늘 공통 추천 | 최근 조회 대상을 약 1시간마다 확인하고 예보 입력이 바뀌면 재생성합니다. 첫 조회, 한국 날짜 변경 또는 마지막 정상 확인 후 3시간 초과 시 생성이 필요합니다. |
 | 오늘 개인화 | 최근 요청 조건은 공통 갱신 예정 10분 전부터 준비합니다. 최초 조합은 요청에서 생성할 수 있습니다. |
-| 주간 추천 | 한국 시간 01:00~02:00 사이에 배치를 한 번 시작합니다. 조회 시 모델을 호출하지 않으며, 결과가 없으면 `OUTFIT_WEEKLY_NOT_READY`를 반환합니다. 이전 결과는 기본 최대 48시간을 사용합니다. |
+| 주간 추천 | 한국 시간 01:00부터 당일 배치를 시작합니다. 서버가 늦게 켜져도 당일 작업을 확인하고, 중단되면 남은 지역부터 이어서 처리합니다. 조회 시 모델을 호출하지 않으며, 결과가 없으면 `OUTFIT_WEEKLY_NOT_READY`를 반환합니다. 이전 결과는 기본 최대 48시간까지 사용합니다. |
 | 시군구 판정 | VWorld 조회 결과를 저장하고 기본 24시간 후 재확인합니다. 조회 장애 시 같은 좌표의 이전 정상 판정을 재사용할 수 있습니다. |
 | 세션 | 인증 활동이 없으면 30분, 계속 사용해도 발급 후 24시간에 만료합니다. 보호 API만 마지막 활동을 갱신하며, 화면은 만료 확인 후 재로그인을 안내합니다. |
 
