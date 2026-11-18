@@ -144,7 +144,8 @@ class WeeklyBatchStore:
                 ready.add(key)
         return [WeeklyBatchTarget(key, requested_at, key in ready, 0) for key, requested_at in targets.items()]
 
-    def _check_lease(self, connection: Connection, run: WeeklyBatchRun) -> None:
+    def check_lease(self, connection: Connection, run: WeeklyBatchRun) -> None:
+        """현재 실행권이 유효한 동안만 상태나 결과 저장을 허용한다."""
         owned = connection.execute(
             "SELECT 1 FROM outfit_weekly_batch_runs WHERE scope=? AND run_date=? "
             "AND status='running' AND lease_token=? AND lease_expires_at>?",
@@ -182,7 +183,7 @@ class WeeklyBatchStore:
             thread.join()
 
     def mark_common_ready(self, connection: Connection, run: WeeklyBatchRun, key: CacheKey) -> None:
-        self._check_lease(connection, run)
+        self.check_lease(connection, run)
         connection.execute(
             "UPDATE outfit_weekly_batch_targets SET common_ready=1 "
             "WHERE scope=? AND run_date=? AND kind=? AND latitude=? AND longitude=?",
@@ -199,7 +200,7 @@ class WeeklyBatchStore:
                 retry_at = self._clock().timestamp() + RETRY_DELAYS[failures - 1]
         with closing(connect_database(self._database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            self._check_lease(connection, run)
+            self.check_lease(connection, run)
             connection.execute(
                 "UPDATE outfit_weekly_batch_targets SET status=?, failures=?, retry_at=? "
                 "WHERE scope=? AND run_date=? AND kind=? AND latitude=? AND longitude=?",
@@ -209,7 +210,7 @@ class WeeklyBatchStore:
     def finish(self, run: WeeklyBatchRun, *, stopped: bool) -> str:
         with closing(connect_database(self._database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            self._check_lease(connection, run)
+            self.check_lease(connection, run)
             states = {
                 row["status"] for row in connection.execute(
                     "SELECT DISTINCT status FROM outfit_weekly_batch_targets WHERE scope=? AND run_date=?",

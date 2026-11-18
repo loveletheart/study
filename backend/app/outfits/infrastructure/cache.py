@@ -202,11 +202,7 @@ class CachedOutfitService:
                 "ON CONFLICT (scope, kind, latitude, longitude) DO UPDATE SET requested_at=excluded.requested_at",
                 (*key, self._clock().timestamp()),
             )
-            connection.execute(
-                "DELETE FROM outfit_result_cache WHERE rowid NOT IN "
-                "(SELECT rowid FROM outfit_result_cache ORDER BY requested_at DESC, rowid DESC LIMIT ?)",
-                (self._max_entries,),
-            )
+            self._prune_cache(connection, key)
         cached = self._read(key)
         if cached is not None:
             return cached
@@ -217,6 +213,30 @@ class CachedOutfitService:
             if cached is not None:
                 return cached
             return self._generate(key)
+
+    def _prune_cache(self, connection: Connection, key: CacheKey) -> None:
+        """현재 요청과 재개 가능한 당일 배치의 주간 행을 용량 정리에서 보호한다."""
+        run_date = self._clock().astimezone(KST).date().isoformat()
+        connection.execute(
+            """
+            WITH ranked_cache AS (
+                SELECT cache.rowid AS entry_id, target.scope IS NOT NULL AS reserved,
+                    ROW_NUMBER() OVER (
+                        ORDER BY ((cache.scope, cache.kind, cache.latitude, cache.longitude) = (?, ?, ?, ?)) DESC,
+                            (target.scope IS NOT NULL) DESC, cache.requested_at DESC, cache.rowid DESC
+                    ) AS cache_rank
+                FROM outfit_result_cache AS cache
+                LEFT JOIN outfit_weekly_batch_runs AS run
+                    ON run.scope=cache.scope AND run.run_date=? AND run.status IN ('running', 'stopped', 'retry_wait')
+                LEFT JOIN outfit_weekly_batch_targets AS target
+                    ON target.scope=run.scope AND target.run_date=run.run_date AND target.kind=cache.kind
+                    AND target.latitude=cache.latitude AND target.longitude=cache.longitude
+            )
+            DELETE FROM outfit_result_cache
+            WHERE rowid IN (SELECT entry_id FROM ranked_cache WHERE cache_rank>? AND NOT reserved)
+            """,
+            (*key, run_date, self._max_entries),
+        )
 
     def _read(self, key: CacheKey) -> OutfitResult | None:
         """한국 날짜가 같고 세 번의 갱신 주기 이내인 정상 결과만 사용"""
@@ -462,6 +482,9 @@ class CachedOutfitService:
         if run is None:
             return {"status": status, "generated": 0, "failed": 0}
 
+        def check_lease(connection: Connection) -> None:
+            self._weekly_batch.check_lease(connection, run)
+
         started = perf_counter()
         logger.info("주간 추천 배치 시작: run_date=%s, targets=%s", run.date, len(targets))
         generated, failed, personalized_generated = 0, 0, 0
@@ -483,7 +506,10 @@ class CachedOutfitService:
                         generated += int(created)
                         if lease_lost.is_set():
                             raise WeeklyBatchLeaseLostError()
-                        personal = on_ready(target.key, result, stopped) if on_ready is not None else None
+                        personal = (
+                            on_ready(target.key, result, stopped, check_lease=check_lease)
+                            if on_ready is not None else None
+                        )
                     except WeeklyBatchLeaseLostError:
                         raise
                     except Exception as exc:
@@ -527,16 +553,14 @@ class CachedOutfitService:
             raise OutfitForecastError()
 
         with closing(connect_database(self._database_path)) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._weekly_batch.check_lease(connection, run)
             connection.execute(
                 "INSERT INTO outfit_result_cache (scope, kind, latitude, longitude, requested_at) "
                 "VALUES (?, ?, ?, ?, ?) ON CONFLICT(scope, kind, latitude, longitude) "
                 "DO UPDATE SET requested_at=MAX(requested_at, excluded.requested_at)", (*key, target.requested_at),
             )
-            connection.execute(
-                "DELETE FROM outfit_result_cache WHERE rowid NOT IN "
-                "(SELECT rowid FROM outfit_result_cache ORDER BY requested_at DESC, rowid DESC LIMIT ?)",
-                (self._max_entries,),
-            )
+            self._prune_cache(connection, key)
             present = connection.execute(
                 "SELECT 1 FROM outfit_result_cache WHERE scope=? AND kind=? AND latitude=? AND longitude=?", key,
             ).fetchone()
@@ -620,6 +644,7 @@ class SQLitePersonalizedOutfitCache:
     def get(
         self, location_id: int, kind: str, base: TodayOutfitResult | WeeklyOutfitResult,
         preferences: OutfitPreferences, register: bool = True, from_weekly_batch: bool = False,
+        *, check_lease: Callable[[Connection], None] | None = None,
     ) -> tuple[PersonalizedOutfits, bool]:
         """주간은 준비된 개인 결과만 제공하고 오늘의 최초 조합은 동적 생성"""
         if kind == "today" and isinstance(base, TodayOutfitResult):
@@ -646,11 +671,17 @@ class SQLitePersonalizedOutfitCache:
                     pass
             if self._weekly_batch_only and kind == "weekly" and not from_weekly_batch:
                 raise WeeklyOutfitNotReadyError()
+            if check_lease is not None:
+                with closing(connect_database(self._database_path)) as connection:
+                    check_lease(connection)
             generated = self._personalizer.personalize(GeneratedOutfits(recommendations, base.engine), preferences)
             if tuple(item.weather for item in generated.recommendations) != tuple(item.weather for item in recommendations):
                 raise OutfitLlmResponseError()
             result = PersonalizedOutfits(generated, self._clock(), uuid4().hex, base_version)
             with closing(connect_database(self._database_path)) as connection, connection:
+                if check_lease is not None:
+                    connection.execute("BEGIN IMMEDIATE")
+                    check_lease(connection)
                 connection.execute(
                     "INSERT INTO outfit_personal_results VALUES (?, ?, ?) "
                     "ON CONFLICT(cache_key) DO UPDATE SET payload=excluded.payload, created_at=excluded.created_at",
@@ -696,7 +727,10 @@ class SQLitePersonalizedOutfitCache:
             except Exception as exc:
                 logger.warning("개인 맞춤 사전 생성 실패: kind=%s, cause=%s", target["kind"], type(exc).__name__)
 
-    def prepare_weekly(self, key: tuple, base: WeeklyOutfitResult, stopped=None) -> dict:
+    def prepare_weekly(
+        self, key: CacheKey, base: WeeklyOutfitResult, stopped=None,
+        *, check_lease: Callable[[Connection], None] | None = None,
+    ) -> dict:
         """주간 기본 결과가 준비된 지역부터 등록된 개인 조건을 같은 야간 작업에서 생성"""
         parts = key[1].split(":")
         if len(parts) != 3 or parts[0] != "region":
@@ -715,9 +749,11 @@ class SQLitePersonalizedOutfitCache:
             try:
                 _, cached = self.get(
                     region_id, "weekly", base, PREFERENCES_ADAPTER.validate_json(target["preferences"]),
-                    register=False, from_weekly_batch=True,
+                    register=False, from_weekly_batch=True, check_lease=check_lease,
                 )
                 generated += int(not cached)
+            except WeeklyBatchLeaseLostError:
+                raise
             except Exception as exc:
                 failed += 1
                 retryable_failed += int(isinstance(exc, WEEKLY_RETRYABLE_ERRORS))

@@ -44,10 +44,10 @@ class WeeklyBatchTests(unittest.TestCase):
         self.fixture.now = self.fixture.now.astimezone(KST).replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=days)
         self.fixture.payload = forecast_payload(self.fixture.now)
 
-    def make_cache(self):
+    def make_cache(self, max_entries=128):
         return CachedOutfitService(
             self.database_path, "batch-test", self.factory, clock=lambda: self.fixture.now,
-            reuse_unchanged_weather=True, weekly_batch_only=True,
+            reuse_unchanged_weather=True, weekly_batch_only=True, max_entries=max_entries,
         )
 
     def test_weekly_request_registers_target_but_never_generates_on_miss(self):
@@ -180,7 +180,7 @@ class WeeklyBatchTests(unittest.TestCase):
         self.at(1)
         stop = Event()
 
-        def stop_after_common(key, base, stopped):
+        def stop_after_common(key, base, stopped, *, check_lease):
             stop.set()
 
         result = self.cache.run_weekly_batch(stopped=stop, on_ready=stop_after_common)
@@ -189,6 +189,38 @@ class WeeklyBatchTests(unittest.TestCase):
         restarted = self.make_cache().run_weekly_batch()
         self.assertEqual((restarted["status"], restarted["generated"]), ("completed", 1))
         self.assertEqual(self.service.get_weekly.call_count, 2)
+
+    def test_full_cache_keeps_weekly_rows_even_when_a_target_was_requested_earlier(self):
+        cache = self.make_cache(max_entries=2)
+        cache.get_region_today(1001, 37, 127)
+        self.at(0, 45)
+        cache.get_region_today(1002, 38, 127)
+
+        self.at(1)
+        result = cache.run_weekly_batch()
+
+        self.assertEqual((result["status"], result["generated"]), ("completed", 2))
+        self.assertEqual(len(cache.get_region_weekly(1001, 37, 127).daily), 7)
+        self.assertEqual(len(cache.get_region_weekly(1002, 38, 127).daily), 7)
+
+    def test_request_pruning_keeps_the_saved_weekly_row_for_a_stopped_batch(self):
+        cache = self.make_cache(max_entries=1)
+        with self.assertRaises(WeeklyOutfitNotReadyError):
+            cache.get_region_weekly(1001, 37, 127)
+        self.at(1)
+        stop = Event()
+
+        def stop_after_common(key, base, stopped, *, check_lease):
+            stop.set()
+
+        self.assertEqual(cache.run_weekly_batch(stopped=stop, on_ready=stop_after_common)["status"], "stopped")
+        self.at(1, 1)
+        cache.get_region_today(1002, 38, 127)
+
+        resumed = self.make_cache(max_entries=1).run_weekly_batch()
+        self.assertEqual((resumed["status"], resumed["generated"]), ("completed", 0))
+        self.assertEqual(len(cache.get_region_weekly(1001, 37, 127).daily), 7)
+        self.service.get_weekly.assert_called_once()
 
     def test_expired_run_lease_recovers_remaining_targets_after_abrupt_exit(self):
         with self.assertRaises(WeeklyOutfitNotReadyError):
@@ -259,6 +291,44 @@ class WeeklyBatchTests(unittest.TestCase):
         )
         self.assertEqual([calls.count(conditions) for conditions in preferences], [1, 2])
         self.service.get_weekly.assert_called_once()
+
+    def test_expired_worker_cannot_overwrite_personal_recommendation_after_takeover(self):
+        preferences = OutfitPreferences(style=OutfitStyle.FORMAL)
+        new_cache = self.make_cache()
+        new_personalizer = Mock()
+        new_personalizer.personalize.side_effect = lambda base, conditions: base
+        new_personal = SQLitePersonalizedOutfitCache(
+            self.database_path, "personal", new_personalizer, new_cache, Mock(),
+            clock=lambda: self.fixture.now, weekly_batch_only=True,
+        )
+        valid_result = []
+
+        def complete_with_replacement_worker(base, conditions):
+            self.at(1, 5)
+            restarted = new_cache.run_weekly_batch(on_ready=new_personal.prepare_weekly)
+            self.assertEqual(restarted["status"], "completed")
+            common = new_cache.get_region_weekly(1001, 37, 127)
+            valid_result.append(new_personal.get(1001, "weekly", common, conditions, register=False)[0])
+            return base
+
+        old_personalizer = Mock()
+        old_personalizer.personalize.side_effect = complete_with_replacement_worker
+        old_personal = SQLitePersonalizedOutfitCache(
+            self.database_path, "personal", old_personalizer, self.cache, Mock(),
+            clock=lambda: self.fixture.now, weekly_batch_only=True,
+        )
+        old_personal.register(1001, "weekly", preferences)
+        with self.assertRaises(WeeklyOutfitNotReadyError):
+            self.cache.get_region_weekly(1001, 37, 127)
+
+        self.at(1)
+        result = self.cache.run_weekly_batch(on_ready=old_personal.prepare_weekly)
+
+        self.assertEqual(result["status"], "lease_lost")
+        common = new_cache.get_region_weekly(1001, 37, 127)
+        saved, cached = new_personal.get(1001, "weekly", common, preferences, register=False)
+        self.assertTrue(cached)
+        self.assertEqual(saved, valid_result[0])
 
     def test_weekly_personal_conditions_wait_for_batch_and_do_not_enter_hourly_preparation(self):
         regions = Mock()
