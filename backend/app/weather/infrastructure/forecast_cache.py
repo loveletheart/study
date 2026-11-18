@@ -111,10 +111,19 @@ class MemoryForecastCache(ForecastCacheBase):
         except TRANSIENT_ERRORS as exc:
             return self._stale_or_raise(cached, exc)
 
-        if self._usable(forecast, coordinates) and forecast.daily[0].date == forecast_date:
-            with self._guard:
-                self._entries[key] = forecast
-                self._entries.move_to_end(key)
-                if len(self._entries) > 128:
-                    self._entries.popitem(last=False)
+        if forecast.daily and forecast.daily[0].date == forecast_date:
+            self.remember(coordinates, forecast)
         return ForecastResult(forecast)
+
+    def remember(self, coordinates: Coordinates, forecast: WeatherForecast) -> None:
+        """보관 가능한 예보를 원래 조회 시각 그대로 저장한다."""
+        if not self._usable(forecast, coordinates):
+            return
+        key = (forecast.daily[0].date, coordinates)
+        with self._guard:
+            previous = self._entries.get(key)
+            if previous is None or previous.fetched_at <= forecast.fetched_at:
+                self._entries[key] = forecast
+            self._entries.move_to_end(key)
+            if len(self._entries) > 128:
+                self._entries.popitem(last=False)
