@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { Look } from '../types'
 import AppIcon from './AppIcon.vue'
-import WardrobeArt from './WardrobeArt.vue'
+import OutfitIllustration from './OutfitIllustration.vue'
 
 const props = defineProps<{
   look: Look
@@ -50,10 +50,8 @@ const clothes = computed(() =>
     </h3>
     <div class="outfit-card-body">
       <div class="look-art">
-        <WardrobeArt
-          :variant="avoid ? 'worst' : 'best'"
-          :one-piece="look.outfit_type === 'one_piece'"
-        /><span>옷차림 예시 일러스트</span>
+        <OutfitIllustration :look="look" />
+        <span>옷차림 예시 일러스트</span>
       </div>
       <dl class="clothing-list">
         <div v-for="[field, label] in clothes" :key="field">
