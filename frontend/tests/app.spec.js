@@ -22,7 +22,7 @@ test('베스트·워스트 일러스트에 각 의류의 색상, 형태, 무늬�
         ...day,
         best: {
           ...day.best,
-          top: '네이비 줄무늬 반팔 티셔츠',
+          top: '흰색 바탕에 검정 줄무늬 반팔 티셔츠',
           bottom: '베이지 긴바지',
           outerwear: null,
         },
@@ -45,7 +45,11 @@ test('베스트·워스트 일러스트에 각 의류의 색상, 형태, 무늬�
   const dress = worst.locator('[data-garment="one_piece"]')
   const jacket = worst.locator('[data-garment="outerwear"]')
   await expect(top).toHaveAttribute('data-shape', 'shortSleeve')
-  await expect(top.locator('path[fill="#303f5d"]')).toBeVisible()
+  await expect(top.locator('path[fill="#faf8f1"]')).toBeVisible()
+  await expect(top.locator('pattern[data-pattern="stripe"] path')).toHaveAttribute(
+    'stroke',
+    '#453d32',
+  )
   await expect(bottom).toHaveAttribute('data-shape', 'pants')
   await expect(bottom.locator('path[fill="#ddc7a0"]')).toBeVisible()
   await expect(dress).toHaveAttribute('data-shape', 'dress')
@@ -61,7 +65,7 @@ test('베스트·워스트 일러스트에 각 의류의 색상, 형태, 무늬�
   await expect(top.locator(`path[fill="url(#${stripeId})"]`)).toBeVisible()
   await expect(dress.locator(`path[fill="url(#${checkId})"]`)).toBeVisible()
   await expect(best.getByText('옷차림 예시 일러스트')).toBeVisible()
-  await expect(best.getByText('네이비 줄무늬 반팔 티셔츠', { exact: true })).toBeVisible()
+  await expect(best.getByText('흰색 바탕에 검정 줄무늬 반팔 티셔츠', { exact: true })).toBeVisible()
   await expect(worst.getByText('검정 체크 원피스', { exact: true })).toBeVisible()
 })
 
@@ -276,6 +280,10 @@ test('개인 취향은 적용할 때 한 번만 요청에 전달하고 날씨는
     page.locator('.outfit-card:not(.avoid-card) [data-garment="top"] path[fill="#faf8f1"]'),
   ).toBeVisible()
   await expect(page.getByText('피할 민소매 티셔츠', { exact: true })).toBeVisible()
+  await expect(page.locator('.avoid-card [data-garment="top"]')).toHaveAttribute(
+    'data-shape',
+    'sleeveless',
+  )
   await expect(page.getByText('부드러운 코튼 셔츠', { exact: true })).toHaveCount(0)
   await expect(page.getByText('얇은 반팔 티셔츠', { exact: true })).toHaveCount(0)
   expect(calls.filter((url) => url.includes('/weather/'))).toHaveLength(1)

@@ -20,6 +20,13 @@ const colors = [
   { name: /빨강|빨간|붉은|레드|\bred\b/iu, fill: '#a85953', dark: true },
 ]
 
+const colorNames = colors.map(({ name }) => name.source).join('|')
+const baseColorPattern = new RegExp(
+  `(${colorNames})\\s*(?:바탕|배경|\\b(?:base|background)\\b)|` +
+    `(?:바탕색|배경색|\\b(?:base|background) colou?r\\b)(?:은|이)?\\s*:?\\s*(${colorNames})`,
+  'iu',
+)
+
 const patterns = [
   { name: /줄\s?무늬|스트라이프|\bstrip(?:e|ed|es)\b/iu, type: 'stripe' },
   { name: /체크|격자|\bcheck(?:ed|ered|s)?\b/iu, type: 'check' },
@@ -27,6 +34,10 @@ const patterns = [
 
 const dressDetail = 'M37 31Q55 49 73 31M37 103h36M43 111l-9 80m33-80 9 80'
 const silhouettes = {
+  sleeveless: {
+    outline: 'M33 30h10Q55 56 67 30h10l4 14q-5 19 8 28l-6 73H27l-6-73q13-9 8-28Z',
+    detail: 'M40 31Q55 59 70 31M28 137h54',
+  },
   shortSleeve: {
     outline: 'M33 30 17 36 2 69l20 10 8-15-3 81h56l-3-81 8 15 20-10-15-33-16-6Q55 57 33 30Z',
     detail: 'M37 31Q55 49 73 31M28 137h54',
@@ -79,6 +90,7 @@ function garmentShape(slot: GarmentSlot, label: string): Shape {
       if (/점프\s?[수슈]트|\bjumpsuit\b/iu.test(label)) return 'jumpsuit'
       return /긴팔|긴\s?소매|\blong[ -]sleeve/iu.test(label) ? 'longSleeveDress' : 'dress'
     case 'top':
+      if (/민소매|\b(?:sleeveless|tank[ -]top)\b/iu.test(label)) return 'sleeveless'
       return /반팔|짧은\s?소매|\bshort[ -]sleeve/iu.test(label) ? 'shortSleeve' : 'longSleeve'
     case 'bottom':
       if (/스커트|치마|\bskirts?\b/iu.test(label)) return 'skirt'
@@ -95,7 +107,9 @@ const garments = computed(() => {
     const label = look[slot]?.trim()
     if (!label) return []
 
-    const color = colors.find(({ name }) => name.test(label))
+    const baseColor = baseColorPattern.exec(label)
+    const colorLabel = baseColor?.[1] ?? baseColor?.[2] ?? label
+    const color = colors.find(({ name }) => name.test(colorLabel))
     const pattern = patterns.find(({ name }) => name.test(label))
     const shape = garmentShape(slot, label)
     return [
