@@ -13,6 +13,39 @@ import {
   recommendation,
 } from './fixtures.js'
 
+test('블루종은 의류 종류로 처리하고 명시된 색상만 일러스트에 반영한다', async ({ page }) => {
+  const day = outfit.recommendation
+  await mockApi(page, {
+    outfitData: {
+      ...outfit,
+      recommendation: {
+        ...day,
+        best: { ...day.best, outerwear: '블루종 네이비 재킷', top: '블루 셔츠' },
+        worst: { ...day.worst, outerwear: '블루종 재킷' },
+      },
+    },
+  })
+  await page.goto('./')
+
+  const best = page.locator('.outfit-comparison article').filter({ hasText: '베스트 옷차림' })
+  const worst = page.locator('.outfit-comparison article').filter({ hasText: '워스트 옷차림' })
+  await expect(best.getByText('블루종 네이비 재킷', { exact: true })).toBeVisible()
+  await expect(best.locator('[data-garment="outerwear"] .garment-fill')).toHaveAttribute(
+    'fill',
+    '#303f5d',
+  )
+  await expect(worst.getByText('블루종 재킷', { exact: true })).toBeVisible()
+  await expect(worst.locator('[data-garment="outerwear"] .garment-fill')).toHaveAttribute(
+    'fill',
+    '#bcb6a9',
+  )
+  await expect(best.getByText('블루 셔츠', { exact: true })).toBeVisible()
+  await expect(best.locator('[data-garment="top"] .garment-fill')).toHaveAttribute(
+    'fill',
+    '#526f96',
+  )
+})
+
 test('바탕색과 긴소매 원피스·코트를 반영하고 카드별 무늬를 구분한다', async ({ page }) => {
   const day = outfit.recommendation
   await mockApi(page, {
