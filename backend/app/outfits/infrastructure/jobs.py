@@ -56,5 +56,5 @@ class WeeklyOutfitBatch:
         self._personalized = personalized
 
     def refresh_due(self, stopped=None) -> dict:
-        """서버의 분 단위 확인에서 한국 시간 새벽 배치만 시작"""
+        """서버의 분 단위 확인에서 주간 배치를 시작하거나 재개"""
         return self._common.run_weekly_batch(stopped=stopped, on_ready=self._personalized.prepare_weekly)

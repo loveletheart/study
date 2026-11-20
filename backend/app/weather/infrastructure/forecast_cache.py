@@ -97,12 +97,7 @@ class MemoryForecastCache(ForecastCacheBase):
     def _resolve(
         self, forecast_date: date, coordinates: Coordinates, load: Callable[[], WeatherForecast],
     ) -> ForecastResult:
-        key = (forecast_date, coordinates)
-        with self._guard:
-            cached = self._entries.get(key)
-            if cached is not None:
-                self._entries.move_to_end(key)
-
+        cached = self._read(forecast_date, coordinates)
         result = self._fresh_result(cached, coordinates)
         if result is not None:
             return result
@@ -111,10 +106,31 @@ class MemoryForecastCache(ForecastCacheBase):
         except TRANSIENT_ERRORS as exc:
             return self._stale_or_raise(cached, exc)
 
-        if self._usable(forecast, coordinates) and forecast.daily[0].date == forecast_date:
-            with self._guard:
-                self._entries[key] = forecast
-                self._entries.move_to_end(key)
-                if len(self._entries) > 128:
-                    self._entries.popitem(last=False)
+        if forecast.daily and forecast.daily[0].date == forecast_date:
+            self.remember(coordinates, forecast)
         return ForecastResult(forecast)
+
+    def stale_after_error(self, coordinates: Coordinates, error: WeatherError) -> ForecastResult:
+        forecast_date = self._clock().astimezone(KST).date()
+        return self._stale_or_raise(self._read(forecast_date, coordinates), error)
+
+    def _read(self, forecast_date: date, coordinates: Coordinates) -> WeatherForecast | None:
+        key = (forecast_date, coordinates)
+        with self._guard:
+            cached = self._entries.get(key)
+            if cached is not None:
+                self._entries.move_to_end(key)
+            return cached
+
+    def remember(self, coordinates: Coordinates, forecast: WeatherForecast) -> None:
+        """보관 가능한 예보를 원래 조회 시각 그대로 저장한다."""
+        if not self._usable(forecast, coordinates):
+            return
+        key = (forecast.daily[0].date, coordinates)
+        with self._guard:
+            previous = self._entries.get(key)
+            if previous is None or previous.fetched_at <= forecast.fetched_at:
+                self._entries[key] = forecast
+            self._entries.move_to_end(key)
+            if len(self._entries) > 128:
+                self._entries.popitem(last=False)

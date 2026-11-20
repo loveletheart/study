@@ -17,15 +17,11 @@ const positions = [
 const layout = computed(() => positions[garments.value.length] ?? [])
 
 const shapes: Record<GarmentShape, { outline: string; seams: string }> = {
-  top: {
-    outline: 'M35 13 20 20 5 44l17 10 9-13v49q19 5 38 0V41l9 13 17-10-15-24-15-7q-15 17-30 0Z',
-    seams: 'M36 14q14 21 28 0M31 85q19 5 38 0',
-  },
-  'short-sleeve': {
+  shortSleeve: {
     outline: 'M35 13 18 20 5 36l16 14 10-11v51q19 5 38 0V39l10 11 16-14-13-16-17-7q-15 16-30 0Z',
     seams: 'M36 14q14 21 28 0M9 32l16 13m50 0 16-13M31 85q19 5 38 0',
   },
-  'long-sleeve': {
+  longSleeve: {
     outline: 'M35 13 17 20 4 65l16 6 11-28v47q19 5 38 0V43l11 28 16-6-13-45-18-7q-15 16-30 0Z',
     seams: 'M36 14q14 21 28 0M6 59l16 6m56 0 16-6M31 85q19 5 38 0',
   },
@@ -58,6 +54,11 @@ const shapes: Record<GarmentShape, { outline: string; seams: string }> = {
       'M34 10 21 15 9 34l16 11 9-10-2 13-13 44q31 11 62 0L68 48l-2-13 9 10 16-11-12-19-13-5q-16 17-32 0Z',
     seams: 'M36 12q14 23 28 0M32 48q18 5 36 0M39 53l-6 36m28-36 6 36',
   },
+  longSleeveDress: {
+    outline:
+      'M34 10 18 17 4 65l16 6 14-36-2 13-13 44q31 11 62 0L68 48l-2-13 14 36 16-6-14-48-16-7q-16 17-32 0Z',
+    seams: 'M36 12q14 23 28 0M32 48q18 5 36 0M39 53l-6 36m28-36 6 36M6 60l16 6m56 0 16-6',
+  },
   jumpsuit: {
     outline: 'M33 10h10v18h14V10h10l8 30 7 55H56l-6-33-6 33H18l7-55 8-30Z',
     seams: 'M26 44h48M40 31h20v10H40ZM50 44v18M19 90h25m12 0h25',
@@ -78,6 +79,7 @@ const shapes: Record<GarmentShape, { outline: string; seams: string }> = {
       <defs v-if="garment.pattern">
         <pattern
           :id="`${patternId}-${garment.slot}`"
+          :data-pattern="garment.pattern"
           width="10"
           height="10"
           patternUnits="userSpaceOnUse"

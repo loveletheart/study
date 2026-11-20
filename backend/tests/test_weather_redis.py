@@ -10,7 +10,8 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from redis import Redis
-from redis.exceptions import ConnectionError as RedisConnectionError, RedisError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.common.config import Settings
 from app.outfits.infrastructure.weather_reader import WeatherServiceReader
@@ -180,12 +181,133 @@ class RedisWeatherTests(unittest.TestCase):
             self.service.get_today(37, 127)
         self.assertIn(before, self.redis.values.values())
 
-    def test_redis_outage_does_not_prevent_a_live_weather_lookup(self):
-        self.redis.get = Mock(side_effect=RedisError())
+    def test_redis_outage_reuses_memory_forecast_across_repeated_requests(self):
+        for error in (RedisConnectionError, RedisTimeoutError):
+            with self.subTest(error=error.__name__):
+                self.setUp()
+                self.redis.get = Mock(side_effect=error())
+                with self.assertLogs("app.weather.infrastructure.redis_cache", level="WARNING"):
+                    forecasts = [get_today(37, 127, self.service).data for _ in range(3)]
+                self.assertFalse(forecasts[0].is_stale)
+                self.assertEqual([result.fetched_at for result in forecasts], [self.now] * 3)
+                self.http.get.assert_called_once()
+
+    def test_redis_outage_coalesces_concurrent_requests_for_the_same_coordinates(self):
+        started, release = Event(), Event()
+        self.redis.get = Mock(side_effect=RedisConnectionError())
+
+        def load(*args):
+            started.set()
+            if not release.wait(5):
+                raise AssertionError("Forecast request was not released")
+            return forecast_payload(self.now)
+
+        self.http.get.side_effect = load
         with self.assertLogs("app.weather.infrastructure.redis_cache", level="WARNING"):
-            result = get_today(37, 127, self.service).data
-        self.assertFalse(result.is_stale)
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                requests = [pool.submit(self.service.get_weekly, 37, 127) for _ in range(3)]
+                try:
+                    self.assertTrue(started.wait(2))
+                finally:
+                    release.set()
+                self.assertEqual([request.result(timeout=2).fetched_at for request in requests], [self.now] * 3)
         self.http.get.assert_called_once()
+
+    def test_redis_hit_is_available_in_memory_during_a_combined_outage(self):
+        initial = self.service.get_weekly(37, 127)
+        reader = self.make_service()
+        self.assertEqual(reader.get_weekly(37, 127), initial)
+
+        with (
+            patch.object(self.redis, "get", side_effect=RedisConnectionError()),
+            self.assertLogs("app.weather.infrastructure.redis_cache", level="WARNING"),
+        ):
+            self.now += timedelta(minutes=30)
+            self.assertEqual(reader.get_weekly(37, 127), initial)
+            self.http.get.assert_called_once()
+
+            self.now += timedelta(minutes=31)
+            self.http.get.side_effect = WeatherProviderTimeoutError()
+            stale = get_today(37, 127, reader).data
+            self.assertTrue(stale.is_stale)
+            self.assertEqual(stale.fetched_at, initial.fetched_at)
+            with self.assertRaises(WeatherProviderTimeoutError):
+                WeatherServiceReader(reader).get_forecast(37, 127)
+
+    def test_redis_outage_does_not_return_expired_or_previous_day_memory_forecasts(self):
+        for before, delta in (
+            (NOW, timedelta(hours=3)),
+            (NOW.replace(hour=14, minute=58), timedelta(minutes=3)),
+        ):
+            with self.subTest(before=before, delta=delta):
+                self.setUp()
+                self.now = before
+                with (
+                    patch.object(self.redis, "get", side_effect=RedisConnectionError()),
+                    self.assertLogs("app.weather.infrastructure.redis_cache", level="WARNING"),
+                ):
+                    self.service.get_weekly(37, 127)
+                    self.now += delta
+                    self.http.get.side_effect = WeatherProviderTimeoutError()
+                    with self.assertRaises(WeatherProviderTimeoutError):
+                        self.service.get_today(37, 127)
+
+    def test_redis_cache_takes_priority_again_after_recovery(self):
+        with (
+            patch.object(self.redis, "get", side_effect=RedisConnectionError()),
+            self.assertLogs("app.weather.infrastructure.redis_cache", level="WARNING"),
+        ):
+            fallback = self.service.get_weekly(37, 127)
+
+        self.now += timedelta(minutes=10)
+        shared = self.make_service().get_weekly(37, 127)
+        self.assertNotEqual(shared.fetched_at, fallback.fetched_at)
+        self.assertEqual(self.service.get_weekly(37, 127), shared)
+        self.assertEqual(self.http.get.call_count, 2)
+
+        with (
+            patch.object(self.redis, "get", side_effect=RedisConnectionError()),
+            self.assertLogs("app.weather.infrastructure.redis_cache", level="WARNING"),
+        ):
+            self.assertEqual(self.service.get_weekly(37, 127), shared)
+        self.assertEqual(self.http.get.call_count, 2)
+
+    def test_redis_miss_uses_remembered_forecast_when_provider_fails(self):
+        with (
+            patch.object(self.redis, "eval", side_effect=RedisTimeoutError()),
+            self.assertLogs("app.weather.infrastructure.redis_cache", level="WARNING"),
+        ):
+            initial = self.service.get_weekly(37, 127)
+
+        self.now += timedelta(minutes=30)
+        self.http.get.side_effect = WeatherProviderTimeoutError()
+        for lookup in (get_today, get_weekly):
+            result = lookup(37, 127, self.service).data
+            self.assertTrue(result.is_stale)
+            self.assertEqual(result.fetched_at, initial.fetched_at)
+        with self.assertRaises(WeatherProviderTimeoutError):
+            WeatherServiceReader(self.service).get_forecast(37, 127)
+        self.assertEqual(self.http.get.call_count, 2)
+
+    def test_redis_miss_rejects_expired_memory_and_nontransient_provider_errors(self):
+        for before, delta, error in (
+            (NOW, timedelta(hours=3), WeatherProviderTimeoutError),
+            (NOW.replace(hour=14, minute=58), timedelta(minutes=3), WeatherProviderTimeoutError),
+            (NOW, timedelta(minutes=30), WeatherProviderDataError),
+        ):
+            with self.subTest(before=before, delta=delta, error=error):
+                self.setUp()
+                self.now = before
+                with (
+                    patch.object(self.redis, "eval", side_effect=RedisTimeoutError()),
+                    self.assertLogs("app.weather.infrastructure.redis_cache", level="WARNING"),
+                ):
+                    self.service.get_weekly(37, 127)
+
+                self.now += delta
+                self.http.get.side_effect = error()
+                with self.assertRaises(error):
+                    self.service.get_today(37, 127)
 
     def test_cached_forecast_is_rechecked_when_midnight_passes_during_read(self):
         self.now = NOW.replace(hour=14, minute=59)

@@ -13,6 +13,58 @@ import {
   recommendation,
 } from './fixtures.js'
 
+test('바탕색과 긴소매 원피스·코트를 반영하고 카드별 무늬를 구분한다', async ({ page }) => {
+  const day = outfit.recommendation
+  await mockApi(page, {
+    outfitData: {
+      ...outfit,
+      recommendation: {
+        ...day,
+        best: {
+          ...day.best,
+          top: '검정 줄무늬가 있는 흰색 바탕 반팔 티셔츠',
+          bottom: '베이지 긴바지',
+          outerwear: null,
+        },
+        worst: {
+          ...day.worst,
+          outfit_type: 'one_piece',
+          top: null,
+          bottom: null,
+          one_piece: '검정 체크 긴소매 원피스',
+          outerwear: '버건디 코트',
+        },
+      },
+    },
+  })
+  await page.goto('./')
+
+  const best = page.locator('.outfit-comparison article').filter({ hasText: '베스트 옷차림' })
+  const worst = page.locator('.outfit-comparison article').filter({ hasText: '워스트 옷차림' })
+  const top = best.locator('[data-garment="top"]')
+  const dress = worst.locator('[data-garment="one_piece"]')
+  await expect(top).toHaveAttribute('data-shape', 'shortSleeve')
+  await expect(top.locator('.garment-fill')).toHaveAttribute('fill', '#faf8f1')
+  await expect(top.locator('pattern path')).toHaveAttribute('stroke', '#453d32')
+  await expect(dress).toHaveAttribute('data-shape', 'longSleeveDress')
+  await expect(dress.locator('.garment-fill')).toHaveAttribute('fill', '#2c2b29')
+  await expect(worst.locator('[data-garment="outerwear"]')).toHaveAttribute('data-shape', 'coat')
+  await expect(worst.locator('[data-garment="outerwear"] .garment-fill')).toHaveAttribute(
+    'fill',
+    '#834754',
+  )
+  await expect(best.locator('[data-garment="outerwear"]')).toHaveCount(0)
+  await expect(worst.locator('[data-garment="top"], [data-garment="bottom"]')).toHaveCount(0)
+
+  const stripeId = await top.locator('pattern[data-pattern="stripe"]').getAttribute('id')
+  const checkId = await dress.locator('pattern[data-pattern="check"]').getAttribute('id')
+  expect(stripeId).not.toBe(checkId)
+  await expect(top.locator(`path[fill="url(#${stripeId})"]`)).toBeVisible()
+  await expect(dress.locator(`path[fill="url(#${checkId})"]`)).toBeVisible()
+  await expect(best.getByText('옷차림 예시 일러스트')).toBeVisible()
+  await expect(best.getByText('검정 줄무늬가 있는 흰색 바탕 반팔 티셔츠')).toBeVisible()
+})
+
 test('첫 방문에는 서울특별시 중구의 날씨와 옷차림을 불러온다', async ({ page }) => {
   await mockApi(page)
   const requestedWeather = page.waitForRequest('**/weather/today?**')
@@ -117,25 +169,25 @@ test('베스트·워스트 일러스트에 각 의류의 색상, 형태, 무늬�
   const worstTop = worst.locator('[data-garment="top"]')
   await expect(best.getByText('옷차림 예시 일러스트')).toBeVisible()
   await expect(best.getByText('네이비 줄무늬 반팔 티셔츠')).toBeVisible()
-  await expect(bestTop).toHaveAttribute('data-shape', 'short-sleeve')
-  await expect(bestTop).toHaveAttribute('data-pattern', 'stripes')
-  await expect(bestTop.locator('.garment-fill')).toHaveAttribute('fill', '#2e4265')
+  await expect(bestTop).toHaveAttribute('data-shape', 'shortSleeve')
+  await expect(bestTop).toHaveAttribute('data-pattern', 'stripe')
+  await expect(bestTop.locator('.garment-fill')).toHaveAttribute('fill', '#303f5d')
   await expect(best.locator('[data-garment="bottom"]')).toHaveAttribute('data-shape', 'pants')
   await expect(best.locator('[data-garment="bottom"] .garment-fill')).toHaveAttribute(
     'fill',
-    '#c9b58e',
+    '#ddc7a0',
   )
   await expect(best.locator('[data-garment="outerwear"]')).toHaveCount(0)
 
   await expect(worst.getByText('기능성 겉옷')).toBeVisible()
-  await expect(worstTop).toHaveAttribute('data-shape', 'long-sleeve')
+  await expect(worstTop).toHaveAttribute('data-shape', 'longSleeve')
   await expect(worstTop).toHaveAttribute('data-pattern', 'check')
-  await expect(worstTop.locator('.garment-fill')).toHaveAttribute('fill', '#fcfaf3')
+  await expect(worstTop.locator('.garment-fill')).toHaveAttribute('fill', '#faf8f1')
   await expect(worst.locator('[data-garment="bottom"]')).toHaveAttribute('data-shape', 'shorts')
   await expect(worst.locator('[data-garment="outerwear"]')).toHaveAttribute('data-shape', 'jacket')
   await expect(worst.locator('[data-garment="outerwear"] .garment-fill')).toHaveAttribute(
     'fill',
-    '#b4b2a5',
+    '#bcb6a9',
   )
   expect(await bestTop.locator('pattern').getAttribute('id')).not.toBe(
     await worstTop.locator('pattern').getAttribute('id'),
@@ -220,7 +272,7 @@ test('이전 배치의 주간 추천은 배열 순서가 아니라 날짜로 연
         ...day,
         best: {
           ...day.best,
-          top: i === 0 ? '어제의 셔츠' : i === 1 ? '오늘의 셔츠' : '다른 날의 셔츠',
+          top: i === 0 ? '어제의 셔츠' : i === 1 ? '오늘의 흰색 셔츠' : '다른 날의 네이비 셔츠',
           bottom: i === 1 ? '베이지 긴바지' : '검정 치마',
         },
         worst: {
@@ -236,7 +288,9 @@ test('이전 배치의 주간 추천은 배열 순서가 아니라 날짜로 연
   )
   await page.goto('./')
   await page.getByRole('button', { name: '일주일', exact: true }).click()
-  await expect(page.getByText('오늘의 셔츠', { exact: true })).toBeVisible()
+  const bestTop = page.locator('.outfit-card:not(.avoid-card) [data-garment="top"]')
+  await expect(page.getByText('오늘의 흰색 셔츠', { exact: true })).toBeVisible()
+  await expect(bestTop.locator('.garment-fill')).toHaveAttribute('fill', '#faf8f1')
   await expect(page.getByText('오늘 피할 반팔', { exact: true })).toBeVisible()
   const bottoms = page.locator('.outfit-comparison [data-garment="bottom"]')
   await expect(bottoms.nth(0)).toHaveAttribute('data-shape', 'pants')
@@ -244,7 +298,8 @@ test('이전 배치의 주간 추천은 배열 순서가 아니라 날짜로 연
   await expect(page.getByText('어제의 셔츠', { exact: true })).not.toBeVisible()
   await expect(page.locator('.inline-notice')).toContainText('예보 기준 추천')
   await page.locator('.day-button').nth(1).click()
-  await expect(page.getByText('다른 날의 셔츠', { exact: true })).toBeVisible()
+  await expect(page.getByText('다른 날의 네이비 셔츠', { exact: true })).toBeVisible()
+  await expect(bestTop.locator('.garment-fill')).toHaveAttribute('fill', '#303f5d')
   await expect(page.getByText('다른 날에 피할 반팔', { exact: true })).toBeVisible()
   await expect(bottoms.nth(0)).toHaveAttribute('data-shape', 'skirt')
   await expect(bottoms.nth(1)).toHaveAttribute('data-shape', 'pants')
@@ -267,7 +322,7 @@ test('개인 취향은 적용할 때 한 번만 요청에 전달하고 날씨는
               ...outfit,
               recommendation: {
                 ...day,
-                best: { ...day.best, top: '검정 옥스퍼드 셔츠' },
+                best: { ...day.best, top: '단정한 흰색 옥스퍼드 셔츠' },
                 worst: { ...day.worst, top: '피할 민소매 티셔츠' },
               },
             }
@@ -282,8 +337,8 @@ test('개인 취향은 적용할 때 한 번만 요청에 전달하고 날씨는
   await page.goto('./')
   await expect(page.getByText('부드러운 코튼 셔츠', { exact: true })).toBeVisible()
   const tops = page.locator('.outfit-comparison [data-garment="top"]')
-  await expect(tops.nth(0).locator('.garment-fill')).toHaveAttribute('fill', '#b4b2a5')
-  await expect(tops.nth(1)).toHaveAttribute('data-shape', 'short-sleeve')
+  await expect(tops.nth(0).locator('.garment-fill')).toHaveAttribute('fill', '#bcb6a9')
+  await expect(tops.nth(1)).toHaveAttribute('data-shape', 'shortSleeve')
   await page.getByRole('button', { name: '내 취향 설정' }).click()
   await page.getByRole('radio', { name: '추위를 타요' }).check()
   await page.getByRole('radio', { name: '단정하게' }).check()
@@ -291,9 +346,9 @@ test('개인 취향은 적용할 때 한 번만 요청에 전달하고 날씨는
   await page.getByRole('button', { name: '내 취향 반영하기' }).click()
   await expect(page.getByRole('dialog')).not.toBeVisible()
   await expect(page.locator('.small-label')).toContainText('취향을 더한 추천')
-  await expect(page.getByText('검정 옥스퍼드 셔츠', { exact: true })).toBeVisible()
+  await expect(page.getByText('단정한 흰색 옥스퍼드 셔츠', { exact: true })).toBeVisible()
   await expect(page.getByText('피할 민소매 티셔츠', { exact: true })).toBeVisible()
-  await expect(tops.nth(0).locator('.garment-fill')).toHaveAttribute('fill', '#303436')
+  await expect(tops.nth(0).locator('.garment-fill')).toHaveAttribute('fill', '#faf8f1')
   await expect(tops.nth(1)).toHaveAttribute('data-shape', 'sleeveless')
   await expect(page.getByText('부드러운 코튼 셔츠', { exact: true })).toHaveCount(0)
   await expect(page.getByText('얇은 반팔 티셔츠', { exact: true })).toHaveCount(0)
@@ -356,7 +411,7 @@ test('원피스의 null 상하의와 누락된 날씨를 올바르게 표시한�
   await expect(best.locator('[data-garment="one_piece"]')).toHaveAttribute('data-shape', 'dress')
   await expect(best.locator('[data-garment="one_piece"] .garment-fill')).toHaveAttribute(
     'fill',
-    '#303436',
+    '#2c2b29',
   )
   const clothingLabels = ['상의', '하의', '원피스', '신발', '준비물']
   await expect(best.locator('.clothing-list dt')).toHaveText(clothingLabels)
