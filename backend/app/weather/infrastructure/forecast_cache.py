@@ -97,12 +97,7 @@ class MemoryForecastCache(ForecastCacheBase):
     def _resolve(
         self, forecast_date: date, coordinates: Coordinates, load: Callable[[], WeatherForecast],
     ) -> ForecastResult:
-        key = (forecast_date, coordinates)
-        with self._guard:
-            cached = self._entries.get(key)
-            if cached is not None:
-                self._entries.move_to_end(key)
-
+        cached = self._read(forecast_date, coordinates)
         result = self._fresh_result(cached, coordinates)
         if result is not None:
             return result
@@ -114,6 +109,18 @@ class MemoryForecastCache(ForecastCacheBase):
         if forecast.daily and forecast.daily[0].date == forecast_date:
             self.remember(coordinates, forecast)
         return ForecastResult(forecast)
+
+    def stale_after_error(self, coordinates: Coordinates, error: WeatherError) -> ForecastResult:
+        forecast_date = self._clock().astimezone(KST).date()
+        return self._stale_or_raise(self._read(forecast_date, coordinates), error)
+
+    def _read(self, forecast_date: date, coordinates: Coordinates) -> WeatherForecast | None:
+        key = (forecast_date, coordinates)
+        with self._guard:
+            cached = self._entries.get(key)
+            if cached is not None:
+                self._entries.move_to_end(key)
+            return cached
 
     def remember(self, coordinates: Coordinates, forecast: WeatherForecast) -> None:
         """보관 가능한 예보를 원래 조회 시각 그대로 저장한다."""

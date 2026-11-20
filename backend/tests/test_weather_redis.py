@@ -272,6 +272,43 @@ class RedisWeatherTests(unittest.TestCase):
             self.assertEqual(self.service.get_weekly(37, 127), shared)
         self.assertEqual(self.http.get.call_count, 2)
 
+    def test_redis_miss_uses_remembered_forecast_when_provider_fails(self):
+        with (
+            patch.object(self.redis, "eval", side_effect=RedisTimeoutError()),
+            self.assertLogs("app.weather.infrastructure.redis_cache", level="WARNING"),
+        ):
+            initial = self.service.get_weekly(37, 127)
+
+        self.now += timedelta(minutes=30)
+        self.http.get.side_effect = WeatherProviderTimeoutError()
+        for lookup in (get_today, get_weekly):
+            result = lookup(37, 127, self.service).data
+            self.assertTrue(result.is_stale)
+            self.assertEqual(result.fetched_at, initial.fetched_at)
+        with self.assertRaises(WeatherProviderTimeoutError):
+            WeatherServiceReader(self.service).get_forecast(37, 127)
+        self.assertEqual(self.http.get.call_count, 2)
+
+    def test_redis_miss_rejects_expired_memory_and_nontransient_provider_errors(self):
+        for before, delta, error in (
+            (NOW, timedelta(hours=3), WeatherProviderTimeoutError),
+            (NOW.replace(hour=14, minute=58), timedelta(minutes=3), WeatherProviderTimeoutError),
+            (NOW, timedelta(minutes=30), WeatherProviderDataError),
+        ):
+            with self.subTest(before=before, delta=delta, error=error):
+                self.setUp()
+                self.now = before
+                with (
+                    patch.object(self.redis, "eval", side_effect=RedisTimeoutError()),
+                    self.assertLogs("app.weather.infrastructure.redis_cache", level="WARNING"),
+                ):
+                    self.service.get_weekly(37, 127)
+
+                self.now += delta
+                self.http.get.side_effect = error()
+                with self.assertRaises(error):
+                    self.service.get_today(37, 127)
+
     def test_cached_forecast_is_rechecked_when_midnight_passes_during_read(self):
         self.now = NOW.replace(hour=14, minute=59)
         old = self.service.get_weekly(37, 127)

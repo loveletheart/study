@@ -12,6 +12,7 @@ from redis.exceptions import RedisError
 
 from app.weather.application.dto import ForecastResult
 from app.weather.application.exceptions import (
+    WeatherError,
     WeatherProviderDataError,
     WeatherProviderTimeoutError,
 )
@@ -82,7 +83,7 @@ class RedisForecastCache(ForecastCacheBase):
             except CACHEABLE_ERRORS as exc:
                 if acquired:
                     self._save(lock_key, f"{key}:error", token, type(exc).__name__, 5)
-                return self._stale_or_raise(cached, exc)
+                return self._forecast_after_error(coordinates, cached, exc)
             self._memory.remember(coordinates, forecast)
             if acquired and self._usable(forecast, coordinates) and forecast.daily[0].date == forecast_date:
                 expires = ceil(self._max_age - self._age(forecast))
@@ -121,7 +122,14 @@ class RedisForecastCache(ForecastCacheBase):
         if not isinstance(failure, str):
             return None
         error = PROVIDER_ERRORS.get(failure)
-        return self._stale_or_raise(cached, error()) if error is not None else None
+        return self._forecast_after_error(coordinates, cached, error()) if error is not None else None
+
+    def _forecast_after_error(
+        self, coordinates: Coordinates, cached: WeatherForecast | None, error: WeatherError,
+    ) -> ForecastResult:
+        if isinstance(error, TRANSIENT_ERRORS) and (cached is None or not self._usable(cached, coordinates)):
+            return self._memory.stale_after_error(coordinates, error)
+        return self._stale_or_raise(cached, error)
 
     def _save(self, lock_key: str, key: str, token: str, value: str | bytes, seconds: int) -> None:
         try:
