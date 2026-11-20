@@ -758,7 +758,7 @@ main {
   overflow: hidden;
   padding: 9px 5px 10px;
 }
-.look-art .wardrobe-art {
+.look-art .outfit-illustration {
   width: 100%;
   max-width: 210px;
 }
@@ -1435,7 +1435,7 @@ body:has(dialog[open]) {
   .clothing-list dd {
     font-size: 12px;
   }
-  .look-art .wardrobe-art {
+  .look-art .outfit-illustration {
     max-width: 250px;
   }
   .weather-summary {
@@ -1717,7 +1717,7 @@ body:has(dialog[open]) {
     padding: 17px;
     gap: 18px;
   }
-  .look-art .wardrobe-art {
+  .look-art .outfit-illustration {
     max-width: 230px;
   }
   .clothing-list {
