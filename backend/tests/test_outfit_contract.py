@@ -15,7 +15,7 @@ from pydantic import TypeAdapter
 from app.common.config import Settings
 from app.outfits.application.exceptions import OutfitLlmResponseError
 from app.outfits.bootstrap import get_cached_outfit_service, get_personalized_outfit_cache
-from app.outfits.domain.models import ClothingPreference, OutfitLook, OutfitPreferences, OutfitType
+from app.outfits.domain.models import AvoidItem, ClothingPreference, OutfitLook, OutfitPreferences, OutfitType
 from app.outfits.domain.rules import build_weekly_wardrobe
 from app.outfits.infrastructure.recommenders import GeminiOutfitRecommender, OllamaOutfitRecommender, PersonalizationChatClient
 from app.outfits.infrastructure.schemas import GeneratedLook
@@ -103,7 +103,7 @@ class OutfitContractTests(unittest.TestCase):
     def test_personalized_outfits_reject_explicit_opposite_style_and_keep_shared_items(self):
         for style, conflicting_names in (
             (ClothingPreference.WOMENSWEAR, ("남성 린넨 재킷", "남성 전용 재킷", "Men\u2019s jacket")),
-            (ClothingPreference.MENSWEAR, ("여성 린넨 재킷", "여성 전용 재킷", "Women's jacket")),
+            (ClothingPreference.MENSWEAR, ("여성 린넨 재킷", "여성 전용 재킷", "Women's jacket", "원 피스", "high heels")),
         ):
             preferences = OutfitPreferences(clothing_preference=style)
             recommender = OllamaOutfitRecommender(
@@ -121,6 +121,88 @@ class OutfitContractTests(unittest.TestCase):
             look["outerwear"] = "공용 재킷"
             self.client.chat.return_value = json.dumps(payload)
             self.assertEqual(recommender.recommend((self.day,)).recommendations[0].best.outerwear, "공용 재킷")
+
+    def test_personalized_avoid_items_trigger_repair_for_best_only(self):
+        preferences = OutfitPreferences(avoid_items=tuple(AvoidItem))
+        recommender = OllamaOutfitRecommender(
+            PersonalizationChatClient(self.client, preferences), "test-model", repair_attempts=1,
+        )
+        for slot, name in (
+            ("bottom", "테니스 스커트"), ("one_piece", "린넨 원피스"), ("bottom", "러닝 쇼츠"),
+            ("shoes", "트레킹 샌들"), ("shoes", "하이 힐"), ("top", "슬리브리스 셔츠"),
+        ):
+            with self.subTest(item=name):
+                self.client.reset_mock()
+                wrong, corrected = self.payload(), self.payload()
+                wrong_day, corrected_day = wrong["days"][0], corrected["days"][0]
+                if slot == "one_piece":
+                    wrong_day["best"] = dress(name)
+                    corrected_day["worst"] = dress(name)
+                else:
+                    wrong_day["best"][slot] = name
+                    corrected_day["worst"][slot] = name
+                corrected_day["best"]["top"] = "드레스 셔츠"
+                self.client.chat.side_effect = [json.dumps(wrong), json.dumps(corrected)]
+
+                day = recommender.recommend((self.day,)).recommendations[0]
+
+                self.assertEqual(day.best.top, "드레스 셔츠")
+                self.assertEqual(getattr(day.worst, slot), name)
+                self.assertEqual(self.client.chat.call_count, 2)
+                first = json.loads(self.client.chat.call_args_list[0].args[1][1]["content"])
+                self.assertTrue(all(look["outfit_type"] == "separates" for look in first["look_examples"]))
+                repair = json.loads(self.client.chat.call_args.args[1][1]["content"])
+                self.assertIn(name, repair["answer_checks"][0])
+
+    def test_personalized_hot_day_retries_unsupported_low_apparent_temperature(self):
+        day = replace(self.day, temperature_min_c=27, temperature_max_c=34,
+                      apparent_temperature_min_c=None, apparent_temperature_max_c=None)
+        recommender = OllamaOutfitRecommender(
+            PersonalizationChatClient(self.client, OutfitPreferences()), "test-model", repair_attempts=1,
+        )
+        wrong, corrected = self.payload(), self.payload()
+        wrong["days"][0]["reasons"] = ["낮은 체감온도에 맞는 니트입니다."]
+        corrected["days"][0]["reasons"] = ["실제 기온 27~34°C에 맞춰 가벼운 옷을 골랐습니다."]
+        self.client.chat.side_effect = [json.dumps(wrong), json.dumps(corrected)]
+
+        generated = recommender.recommend((day,)).recommendations[0]
+
+        self.assertIn(corrected["days"][0]["reasons"][0], generated.reasons)
+        first, second = [json.loads(call.args[1][1]["content"]) for call in self.client.chat.call_args_list]
+        self.assertIn("실제 기온 27~34°C", first["weather_days"][0]["temperature_evidence"])
+        self.assertIn("체감온도는 제공되지 않았습니다", second["answer_checks"][0])
+
+    def test_rain_explanation_retries_unsupported_protection_from_plain_clothes(self):
+        day = replace(self.day, precipitation_mm=12, precipitation_probability_percent=80)
+        recommender = OllamaOutfitRecommender(self.client, "test-model", repair_attempts=1)
+        for field, item, sentence in (
+            ("reasons", "경량 점퍼", "경량 점퍼는 비에 젖지 않도록 보호하면서도 움직임에 방해가 없습니다."),
+            ("reasons", "코트", "코트는 비를 막아 주는 역할을 합니다."),
+            ("reasons", "가벼운 코트", "가벼운 코트는 비와 바람을 막아주며, 우산은 비를 효과적으로 방지합니다."),
+            ("avoid_reasons", "가벼운 코트", "가벼운 코트는 비와 바람을 방지합니다."),
+        ):
+            with self.subTest(field=field, garment=item):
+                self.client.reset_mock()
+                wrong, corrected = self.payload(), self.payload()
+                look = "best" if field == "reasons" else "worst"
+                wrong["days"][0][look]["outerwear"] = item
+                wrong["days"][0][look]["accessories"] = ["우산"]
+                wrong["days"][0][field] = [sentence]
+                best = corrected["days"][0]["best"]
+                best["outerwear"] = "방수 재킷"
+                best["accessories"] = ["우산"]
+                corrected["days"][0]["reasons"] = [
+                    "방수 재킷은 비를 막아 주고 체온을 유지하는 데 도움이 됩니다.",
+                    "우산이 비를 막아 주고 바지는 보온에 도움이 됩니다.",
+                ]
+                self.client.chat.side_effect = [json.dumps(wrong), json.dumps(corrected)]
+
+                result = recommender.recommend((day,)).recommendations[0]
+
+                self.assertEqual(result.best.outerwear, "방수 재킷")
+                first, second = [json.loads(call.args[1][1]["content"]) for call in self.client.chat.call_args_list]
+                self.assertIn("우비", first["rain_protection"])
+                self.assertIn(look, second["answer_checks"][0])
 
     def test_outfit_type_and_parts_must_agree(self):
         for look in (dress() | {"top": "셔츠"}, dress() | {"bottom": "바지"}, dress() | {"one_piece": None},
