@@ -12,7 +12,10 @@ _RAIN_PROTECTION_CLAIM = re.compile(
     r'(?:막(?:아|고|으며|습니다)|(?:차단|방지)(?:해|하고|하며|합니다))'
     r'|비에\s*젖지\s*않도록\s*보호(?:해|하고|하며|하면서|합니다)'
 )
-_NEGATED_PROTECTION = re.compile(r'(?:막아|차단해|방지해|보호해)\s*(?:주지|줄\s*수\s*없)')
+_NEGATED_PROTECTION = re.compile(
+    r'\s*(?:주지(?:는|도)?\s*(?:않|못)|줄\s*수(?:는|가)?\s*없'
+    r'|(?:주는\s*)?(?:기능|효과|성능)(?:이|은|는)?\s*없)'
+)
 
 
 @dataclass(frozen=True)
@@ -39,15 +42,18 @@ def _unsupported_rain_protection(explanations: list[str], look: dict) -> bool:
     ) + tuple(look.get('accessories') or ())
     clauses = re.split(r'[,;\n]|(?<=[.!?])\s+', '\n'.join(explanations))
     for clause in clauses:
-        claim = _RAIN_PROTECTION_CLAIM.search(clause)
-        if claim is None or _NEGATED_PROTECTION.search(clause):
-            continue
-        subject = clause[:claim.start()]
-        if _RAIN_GEAR.search(subject):
-            continue
-        mentioned = [name for name in names if name in subject]
-        if mentioned and not any(_WATER_PROTECTION.search(name) for name in mentioned):
-            return True
+        subject_start = 0
+        for claim in _RAIN_PROTECTION_CLAIM.finditer(clause):
+            # 각 주장의 주어와 뒤따르는 부정 표현을 해당 주장에만 연결한다.
+            subject = clause[subject_start:claim.start()]
+            subject_start = claim.end()
+            if _NEGATED_PROTECTION.match(clause, claim.end()):
+                continue
+            if _RAIN_GEAR.search(subject):
+                continue
+            mentioned = [name for name in names if name in subject]
+            if mentioned and not any(_WATER_PROTECTION.search(name) for name in mentioned):
+                return True
     return False
 
 
@@ -94,21 +100,31 @@ def check_day(day: dict, weather: dict, preferences: dict | None = None) -> dict
                 f"{look}의 설명은 선택한 의류의 실제 역할에 맞게 작성해 주세요. "
                 "비를 막는 역할은 우산·우비·장화 또는 방수 기능을 명시한 품목에만 연결해 주세요.",
             ))
-    apparent = weather.get('apparent_temperature_min_c') is not None and weather.get('apparent_temperature_max_c') is not None
-    low = weather.get('apparent_temperature_min_c') if apparent else weather.get('temperature_min_c')
+    apparent_minimum = weather.get('apparent_temperature_min_c')
+    apparent_maximum = weather.get('apparent_temperature_max_c')
+    apparent = apparent_minimum is not None and apparent_maximum is not None
+    low = apparent_minimum if apparent else weather.get('temperature_min_c')
     explanation = ' '.join(day.get('reasons', []) + day.get('avoid_reasons', []) + day.get('precautions', []))
     if low is not None and low >= HOT_DAY_MINIMUM_C and re.search(r'(?:2[7-9]|[3-5]\d)(?:\.\d+)?\s*(?:도|°C|℃).{0,10}(?:너무 추|추위|추운)', explanation):
         errors.append(QualityIssue('weather_logic', '높은 기온을 추위의 근거로 설명하고 있습니다.'))
     reasons = ' '.join(day.get('reasons', []) + day.get('avoid_reasons', []))
     if (
         preferences is not None and low is not None and low >= HOT_DAY_MINIMUM_C
-        and weather.get('apparent_temperature_min_c') is None
-        and weather.get('apparent_temperature_max_c') is None
+        and not apparent
+        and all(value is None or value >= HOT_DAY_MINIMUM_C for value in (apparent_minimum, apparent_maximum))
         and re.search(r'낮은\s+체감\s*온도(?:와|에|로|를)', reasons)
     ):
+        if apparent_minimum is None and apparent_maximum is None:
+            evidence = '체감온도는 제공되지 않았습니다.'
+        else:
+            evidence = ' '.join(
+                f'체감 {label}는 제공되지 않았습니다.' if value is None
+                else f'제공된 체감 {label} {value:g}°C입니다.'
+                for label, value in (('최저', apparent_minimum), ('최고', apparent_maximum))
+            )
         errors.append(QualityIssue(
             'weather_logic',
-            f"체감온도는 제공되지 않았습니다. 실제 최저 {low:g}°C와 실제 최고기온을 근거로 추천과 이유를 작성해 주세요.",
+            f"{evidence} 실제 최저 {low:g}°C와 실제 최고기온을 근거로 추천과 이유를 작성해 주세요.",
         ))
     if re.search('플라스틱 원피스|고무장갑.{0,12}(?:부츠|방한화)|발이 썩', explanation + str(day['best']) + str(day['worst'])):
         errors.append(QualityIssue('clothing_category', '현실적인 의류명과 확인 가능한 설명을 사용해 주세요.'))

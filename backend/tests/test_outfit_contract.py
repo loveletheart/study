@@ -130,6 +130,7 @@ class OutfitContractTests(unittest.TestCase):
         for slot, name in (
             ("bottom", "테니스 스커트"), ("one_piece", "린넨 원피스"), ("bottom", "러닝 쇼츠"),
             ("shoes", "트레킹 샌들"), ("shoes", "하이 힐"), ("top", "슬리브리스 셔츠"),
+            ("shoes", "굽 높은 구두"), ("shoes", "굽이 높은 구두"),
         ):
             with self.subTest(item=name):
                 self.client.reset_mock()
@@ -155,22 +156,58 @@ class OutfitContractTests(unittest.TestCase):
                 self.assertIn(name, repair["answer_checks"][0])
 
     def test_personalized_hot_day_retries_unsupported_low_apparent_temperature(self):
-        day = replace(self.day, temperature_min_c=27, temperature_max_c=34,
-                      apparent_temperature_min_c=None, apparent_temperature_max_c=None)
         recommender = OllamaOutfitRecommender(
             PersonalizationChatClient(self.client, OutfitPreferences()), "test-model", repair_attempts=1,
         )
-        wrong, corrected = self.payload(), self.payload()
-        wrong["days"][0]["reasons"] = ["낮은 체감온도에 맞는 니트입니다."]
-        corrected["days"][0]["reasons"] = ["실제 기온 27~34°C에 맞춰 가벼운 옷을 골랐습니다."]
-        self.client.chat.side_effect = [json.dumps(wrong), json.dumps(corrected)]
+        for minimum, maximum, evidence in (
+            (None, None, "체감온도는 제공되지 않았습니다"),
+            (None, 36, "체감 최저는 제공되지 않았습니다"),
+            (32, None, "체감 최고는 제공되지 않았습니다"),
+        ):
+            with self.subTest(apparent_minimum=minimum, apparent_maximum=maximum):
+                self.client.reset_mock()
+                day = replace(self.day, temperature_min_c=27, temperature_max_c=34,
+                              apparent_temperature_min_c=minimum, apparent_temperature_max_c=maximum)
+                wrong, corrected = self.payload(), self.payload()
+                wrong["days"][0]["reasons"] = ["낮은 체감온도에 맞는 니트입니다."]
+                corrected["days"][0]["reasons"] = ["실제 기온 27~34°C에 맞춰 가벼운 옷을 골랐습니다."]
+                self.client.chat.side_effect = [json.dumps(wrong), json.dumps(corrected)]
 
-        generated = recommender.recommend((day,)).recommendations[0]
+                generated = recommender.recommend((day,)).recommendations[0]
 
-        self.assertIn(corrected["days"][0]["reasons"][0], generated.reasons)
-        first, second = [json.loads(call.args[1][1]["content"]) for call in self.client.chat.call_args_list]
-        self.assertIn("실제 기온 27~34°C", first["weather_days"][0]["temperature_evidence"])
-        self.assertIn("체감온도는 제공되지 않았습니다", second["answer_checks"][0])
+                self.assertIn(corrected["days"][0]["reasons"][0], generated.reasons)
+                self.assertEqual(self.client.chat.call_count, 2)
+                first, second = [json.loads(call.args[1][1]["content"]) for call in self.client.chat.call_args_list]
+                provided_day = first["weather_days"][0]
+                self.assertEqual(provided_day["temperature_basis"], "temperature")
+                self.assertEqual(provided_day["apparent_temperature_min_c"], minimum)
+                self.assertEqual(provided_day["apparent_temperature_max_c"], maximum)
+                self.assertIn("실제 기온 27~34°C", provided_day["temperature_evidence"])
+                self.assertIn(evidence, second["answer_checks"][0])
+                if minimum is not None or maximum is not None:
+                    label, value = ("최저", minimum) if minimum is not None else ("최고", maximum)
+                    self.assertIn(f"체감 {label} {value:g}°C", second["answer_checks"][0])
+
+    def test_personalized_partial_low_apparent_temperature_does_not_trigger_repair(self):
+        recommender = OllamaOutfitRecommender(
+            PersonalizationChatClient(self.client, OutfitPreferences()), "test-model", repair_attempts=1,
+        )
+        for minimum, maximum in ((18, None), (None, 18), (0, None)):
+            with self.subTest(apparent_minimum=minimum, apparent_maximum=maximum):
+                self.client.reset_mock()
+                day = replace(self.day, temperature_min_c=27, temperature_max_c=34,
+                              apparent_temperature_min_c=minimum, apparent_temperature_max_c=maximum)
+                payload = self.payload()
+                label, value = ("최저", minimum) if minimum is not None else ("최고", maximum)
+                explanation = f"낮은 체감온도에 맞는 니트입니다. 제공된 체감 {label}는 {value:g}°C입니다."
+                payload["days"][0]["reasons"] = [explanation]
+                self.client.chat.side_effect = None
+                self.client.chat.return_value = json.dumps(payload)
+
+                generated = recommender.recommend((day,)).recommendations[0]
+
+                self.assertIn(explanation, generated.reasons)
+                self.client.chat.assert_called_once()
 
     def test_rain_explanation_retries_unsupported_protection_from_plain_clothes(self):
         day = replace(self.day, precipitation_mm=12, precipitation_probability_percent=80)
@@ -180,6 +217,11 @@ class OutfitContractTests(unittest.TestCase):
             ("reasons", "코트", "코트는 비를 막아 주는 역할을 합니다."),
             ("reasons", "가벼운 코트", "가벼운 코트는 비와 바람을 막아주며, 우산은 비를 효과적으로 방지합니다."),
             ("avoid_reasons", "가벼운 코트", "가벼운 코트는 비와 바람을 방지합니다."),
+            ("reasons", "코트", "우산은 비를 막아 주고 코트도 비를 막아 줍니다."),
+            ("avoid_reasons", "코트", "우산은 비를 막아 주고 코트도 비를 막아 줍니다."),
+            ("reasons", "코트", "우산은 비를 막아 주지 않지만 코트는 비를 막아 줍니다."),
+            ("reasons", "코트", "코트는 비를 막아 주고 우산은 비를 막아 주지 않습니다."),
+            ("reasons", "코트", "우산은 비를 막아 주고 코트는 비를 막아 주며 신발도 비를 막아 줍니다."),
         ):
             with self.subTest(field=field, garment=item):
                 self.client.reset_mock()
@@ -203,6 +245,35 @@ class OutfitContractTests(unittest.TestCase):
                 first, second = [json.loads(call.args[1][1]["content"]) for call in self.client.chat.call_args_list]
                 self.assertIn("우비", first["rain_protection"])
                 self.assertIn(look, second["answer_checks"][0])
+
+    def test_rain_explanation_accepts_negated_protection_without_repair(self):
+        day = replace(self.day, precipitation_mm=12, precipitation_probability_percent=80)
+        recommender = OllamaOutfitRecommender(self.client, "test-model", repair_attempts=1)
+        for field in ("reasons", "avoid_reasons"):
+            for sentence in (
+                "코트는 비를 막아 주는 기능이 없습니다.",
+                "코트는 비를 막아주는 기능은 없고 보온을 돕습니다.",
+                "코트는 비를 막아 주지 않습니다.",
+                "코트는 비를 막아 줄 수 없습니다.",
+                "코트는 비에 젖지 않도록 보호해 주는 기능이 없습니다.",
+                "코트는 비를 막아 주는 기능이 없고 우산은 비를 막아 줍니다.",
+                "우산은 비를 막아 주고 코트는 비를 막아 주는 기능이 없습니다.",
+                "우산은 비를 막아 주고 코트는 비를 막아 주지 않습니다.",
+            ):
+                with self.subTest(field=field, explanation=sentence):
+                    self.client.reset_mock()
+                    payload = self.payload()
+                    look = "best" if field == "reasons" else "worst"
+                    payload["days"][0][look]["outerwear"] = "코트"
+                    payload["days"][0][look]["accessories"] = ["우산"]
+                    payload["days"][0][field] = [sentence]
+                    self.client.chat.side_effect = None
+                    self.client.chat.return_value = json.dumps(payload)
+
+                    generated = recommender.recommend((day,)).recommendations[0]
+
+                    self.assertIn(sentence, getattr(generated, field))
+                    self.client.chat.assert_called_once()
 
     def test_outfit_type_and_parts_must_agree(self):
         for look in (dress() | {"top": "셔츠"}, dress() | {"bottom": "바지"}, dress() | {"one_piece": None},

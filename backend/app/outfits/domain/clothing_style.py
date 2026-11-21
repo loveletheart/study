@@ -32,7 +32,7 @@ _AVOID_OPTIONS = {
     AvoidItem.DRESSES: ("원피스", ("one_piece", "top"), _DRESS),
     AvoidItem.SHORTS: ("반바지", ("bottom",), r"반\s*바지|쇼츠|\bshorts\b"),
     AvoidItem.SANDALS: ("샌들", ("shoes",), r"샌들|\bsandals?\b"),
-    AvoidItem.HEELS: ("굽 높은 신발", ("shoes",), rf"{_HEELS}|굽\s*높은"),
+    AvoidItem.HEELS: ("굽 높은 신발", ("shoes",), rf"{_HEELS}|굽(?:이)?\s*높은"),
     AvoidItem.SLEEVELESS: ("민소매", ("top", "one_piece"), r"민\s*소매|나시|슬리브리스|\bsleeveless\b|\btank[\s-]*tops?\b"),
 }
 AVOID_ITEM_NAMES = {item: option[0] for item, option in _AVOID_OPTIONS.items()}
