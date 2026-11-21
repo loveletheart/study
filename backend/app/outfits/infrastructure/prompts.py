@@ -6,13 +6,14 @@ import json
 from dataclasses import asdict
 
 # 프로젝트 모듈
-from app.outfits.domain.models import OutfitWeather, Activity, ColdSensitivity, OutfitPreferences, OutfitStyle, ClothingPreference, AvoidItem
+from app.outfits.domain.clothing_style import AVOID_ITEM_NAMES
+from app.outfits.domain.models import OutfitWeather, Activity, AvoidItem, ColdSensitivity, OutfitPreferences, OutfitStyle, ClothingPreference
 from app.outfits.domain.rules import temperature_reference
 
 
 # 프롬프트 버전
-PROMPT_VERSION = "2.2"
-PERSONALIZATION_VERSION = "2.6"
+PROMPT_VERSION = "2.3"
+PERSONALIZATION_VERSION = "2.8"
 
 
 # 기본 추천 프롬프트
@@ -41,11 +42,25 @@ LOOK_EXAMPLES = (
 
 
 # 개인화 프롬프트
-PERSONALIZATION_INSTRUCTION = """명시된 preferences와 personal_requirements를 모두 함께 반영하세요.
-cold_sensitivity='cold'는 추위를 많이 타는 것, 'warm'은 더위를 많이 타는 것, normal은 어느 쪽도 아닌 것을 뜻합니다. 반대로 해석하지 마세요.
-formal은 격식 있고 단정한 옷차림, casual은 일상의 편안함, active는 움직임과 땀 관리, outdoor는 야외 노출에 대한 보호가 필요합니다.
-실제로 선택한 옷이 이 사람의 요구와 날씨에 어떻게 맞는지 설명하세요. 상투적인 문구를 피하세요.
-더위를 탄다고 추운 날 필요한 방한을 생략하지 말고, 추위를 탄다고 더운 날 겨울옷을 정당화하지 마세요."""
+PERSONALIZATION_INSTRUCTION = """옷을 고르기 전에 preferences와 personal_requirements를 확인하세요.
+best와 worst를 모두 선택한 의류 스타일과 공용 의류 안에서 구성하세요. 같은 의류 취향 안에서 날씨나 활동에 맞지 않는 조합을 worst로 고르세요.
+worst에도 실제로 흔히 입는 옷을 사용하세요. 예를 들어 더운 날에는 두꺼운 니트와 무거운 바지 조합을 피할 옷차림으로 보여 줄 수 있습니다.
+best에서는 피할 의류를 모두 제외하고 날씨와 활동에 맞는 대안을 사용하세요.
+temperature_basis가 temperature이면 실제 기온, apparent_temperature이면 체감온도를 근거로 삼으세요. 제공되지 않은 체감온도나 시간대별 바람은 추정하지 마세요.
+최저기온도 높은 날에는 아침 방한이나 한낮 겉옷을 관성적으로 권하지 마세요. 필요 없으면 outerwear를 null로 두세요.
+의류의 방수 등 기능은 의류명에 그 기능을 명시한 경우에만 근거로 쓰세요.
+각 설명은 실제 옷과 날씨를 연결하는 짧은 문장으로 작성하세요. 별도 주의사항이 없으면 precautions는 빈 목록으로 두세요.
+의류 선호로 성별 정체성이나 치수를 추정하지 마세요."""
+
+
+_AVOID_ALTERNATIVES = {
+    AvoidItem.SKIRTS: "하의는 바지를 고르세요.",
+    AvoidItem.DRESSES: "상의와 하의를 조합하거나 날씨에 맞는 점프수트를 고를 수 있습니다.",
+    AvoidItem.SHORTS: "하의는 긴 바지를 고르세요.",
+    AvoidItem.SANDALS: "신발은 활동에 맞는 닫힌 신발을 고르세요.",
+    AvoidItem.HEELS: "신발은 굽이 낮은 것을 고르세요.",
+    AvoidItem.SLEEVELESS: "상의는 반팔 티셔츠나 소매가 있는 셔츠처럼 소매 있는 옷을 고르세요.",
+}
 
 
 # 프롬프트 입력 생성
@@ -62,12 +77,19 @@ def build_messages(days: tuple[OutfitWeather, ...], schema: dict) -> list[dict[s
                 "체감온도_최저_C": day.apparent_temperature_min_c, "체감온도_최고_C": day.apparent_temperature_max_c,
             },
         })
-    content = json.dumps({
+    payload = {
         "timezone": "Asia/Seoul",
         "units": {"temperature": "°C", "precipitation": "mm", "snowfall": "cm", "wind_speed": "m/s", "probability": "%"},
         "weather_days": weather, "unprovided_weather": ["humidity"],
         "look_examples": LOOK_EXAMPLES, "output_schema": schema,
-    }, ensure_ascii=False, allow_nan=False)
+    }
+    if any((day.precipitation_mm or 0) > 0 or (day.precipitation_probability_percent or 0) > 0 for day in days):
+        payload["rain_protection"] = (
+            "비에 대비하는 날에는 우산, 우비, 장화 또는 이름에 방수 기능을 명시한 품목이 비를 막는 역할을 설명하세요. "
+            "일반 코트나 운동화를 고르면 보온이나 걷기 편한 점을 설명하세요. "
+            "비를 막는 품목과 따뜻하게 입는 옷을 각각 구체적으로 설명하세요."
+        )
+    content = json.dumps(payload, ensure_ascii=False, allow_nan=False)
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": content}]
 
 
@@ -93,21 +115,16 @@ def _personal_requirements(preferences: OutfitPreferences) -> dict[str, str]:
     if preferences.clothing_preference != ClothingPreference.ANY:
         requirements["선호_의류"] = {
             ClothingPreference.MENSWEAR: (
-                "남성복 스타일을 선택했습니다. best와 worst 모두 남성복 스타일 또는 공용 의류로 구성하세요. "
-                "원피스·치마·드레스·하이힐 같은 여성복 스타일은 두 조합에서 제외하세요. "
-                "공용 티셔츠·니트·바지·운동화와 작업용 점프수트는 사용할 수 있습니다. "
-                "worst는 같은 의류 취향 안에서 날씨나 활동에 맞지 않는 조합을 고르세요. "
-                "성별 정체성이나 신체 치수는 추정하지 마세요."
+                "best와 worst 모두 남성복 또는 공용 의류를 고르세요. 원피스·드레스·치마·하이힐은 제외하세요. "
+                "상의와 하의가 있는 조합은 separates입니다. 남성용 또는 공용 점프수트를 고른 경우에만 one_piece를 쓰세요."
             ),
             ClothingPreference.WOMENSWEAR: (
-                "여성복 스타일을 선택했습니다. best와 worst 모두 여성복 스타일 또는 공용 의류로 구성하세요. "
-                "남성 전용으로 표시된 품목은 두 조합에서 제외하세요. "
-                "공용 티셔츠·니트·바지·운동화도 쓸 수 있으며 원피스나 치마는 필수가 아닙니다. "
-                "worst는 같은 의류 취향 안에서 날씨나 활동에 맞지 않는 조합을 고르세요. "
-                "성별 정체성이나 신체 치수는 추정하지 마세요."
+                "best와 worst 모두 여성복 또는 공용 의류를 고르세요. 남성 전용 품목은 제외하세요. "
+                "상의와 바지 조합, 치마, 원피스, 점프수트를 날씨와 활동에 맞게 선택할 수 있습니다."
             ),
         }[preferences.clothing_preference]
     if preferences.avoid_items:
-        names = {AvoidItem.SKIRTS: "치마", AvoidItem.DRESSES: "원피스", AvoidItem.SHORTS: "반바지", AvoidItem.SANDALS: "샌들", AvoidItem.HEELS: "굽 높은 신발", AvoidItem.SLEEVELESS: "민소매"}
-        requirements["피할_의류"] = "베스트 추천에서 다음 항목을 제외하세요: " + ", ".join(names[item] for item in preferences.avoid_items) + ". 날씨에 맞는 대안을 선택하고 피하는 이유나 개인 사정을 지어내지 마세요."
+        names = ", ".join(AVOID_ITEM_NAMES[item] for item in preferences.avoid_items)
+        alternatives = " ".join(_AVOID_ALTERNATIVES[item] for item in preferences.avoid_items)
+        requirements["피할_의류"] = f"best 제외 품목은 {names}입니다. best에는 다음 대안을 사용하세요. {alternatives}"
     return requirements

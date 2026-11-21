@@ -208,6 +208,47 @@ class FallbackTests(unittest.TestCase):
                 self.assertFalse(result.engine.fallback_used)
                 cloud.assert_not_called()
 
+    def test_weekly_local_timeout_uses_longer_default_for_common_and_personal_recommendations(self):
+        for enabled, normal, explicit, expected in [
+            (True, 180, None, (20, 60)),
+            (True, 45, None, (20, 45)),
+            (True, 180, 15, (15, 15)),
+            (True, 45, 75, (45, 45)),
+            (False, 180, 15, (180, 180)),
+        ]:
+            settings = Settings(
+                "test", self.database_path, llm_model="local-model", cloud_fallback_enabled=enabled,
+                llm_timeout_seconds=normal, fallback_local_timeout_seconds=explicit,
+            )
+            with (
+                patch("app.outfits.bootstrap.get_settings", return_value=settings),
+                patch("app.outfits.bootstrap.get_weather_service", return_value=self.fixture.weather_service),
+                patch("app.outfits.bootstrap.GeminiClient") as cloud,
+            ):
+                service = get_outfit_service()
+                personal = LlmOutfitPersonalizer(_personal_recommender)
+                for days, recommend, limit in [
+                    (self.forecast.days[:1], service.recommend_today, expected[0]),
+                    (self.forecast.days, service.recommend_weekly, expected[1]),
+                ]:
+                    content = outfit_fixtures.generated_content([day.date.isoformat() for day in days])
+                    for personalized in (False, True):
+                        with (
+                            self.subTest(enabled=enabled, normal=normal, explicit=explicit,
+                                         day_count=len(days), personalized=personalized),
+                            patch("app.outfits.infrastructure.clients.urlopen",
+                                  return_value=http_response(chat_envelope(content))) as local,
+                        ):
+                            if personalized:
+                                base = self.fixture.recommender.recommend(days)
+                                result = personal.personalize(base, OutfitPreferences())
+                            else:
+                                result = recommend(self.forecast)
+                            local.assert_called_once()
+                            self.assertEqual(local.call_args.kwargs["timeout"], limit)
+                            self.assertEqual(result.engine.provider, "ollama")
+                cloud.assert_not_called()
+
     def test_personal_local_failure_calls_cloud_once_with_preferences_and_fallback_metadata(self):
         """로컬 개인화 실패 시 같은 조건을 SDK로 한 번 전달하고 전환 정보를 보존한다."""
         base = self.fixture.recommender.recommend(self.forecast.days[:1])
