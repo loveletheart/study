@@ -10,8 +10,9 @@ _WATER_PROTECTION = re.compile(r'방수|발수|\bwaterproof\b', re.IGNORECASE)
 _RAIN_PROTECTION_CLAIM = re.compile(
     r'(?:비를|비와\s*바람을|비바람을)\s*(?:(?:효과적으로|잘)\s*)?'
     r'(?:막(?:아|고|으며|습니다)|(?:차단|방지)(?:해|하고|하며|합니다))'
-    r'|비에\s*젖지\s*않도록\s*보호(?:해|하고|하며|하면서|합니다)'
+    r'|(?P<keeping_dry>비에\s*젖지\s*않도록\s*보호(?:해|하고|하며|하면서|합니다))'
 )
+_PROTECTED_ITEM = re.compile(r'(?:주(?:고|며|면서)\s+)?(?P<item>.+?)(?:이|가)')
 _NEGATED_PROTECTION = re.compile(
     r'\s*(?:주지(?:는|도)?\s*(?:않|못)|줄\s*수(?:는|가)?\s*없'
     r'|(?:주는\s*)?(?:기능|효과|성능)(?:이|은|는)?\s*없)'
@@ -43,16 +44,26 @@ def _unsupported_rain_protection(explanations: list[str], look: dict) -> bool:
     clauses = re.split(r'[,;\n]|(?<=[.!?])\s+', '\n'.join(explanations))
     for clause in clauses:
         subject_start = 0
+        has_protector = False
         for claim in _RAIN_PROTECTION_CLAIM.finditer(clause):
             # 각 주장의 주어와 뒤따르는 부정 표현을 해당 주장에만 연결한다.
             subject = clause[subject_start:claim.start()]
             subject_start = claim.end()
             if _NEGATED_PROTECTION.match(clause, claim.end()):
+                has_protector = False
                 continue
-            if _RAIN_GEAR.search(subject):
+            # 앞의 보호 주체가 이어지면 '코트가 비에 젖지 않도록'의 코트는 보호 대상이다.
+            if (
+                has_protector and claim.group('keeping_dry')
+                and (target := _PROTECTED_ITEM.fullmatch(subject.strip()))
+                and target['item'] in names
+            ):
                 continue
             mentioned = [name for name in names if name in subject]
-            if mentioned and not any(_WATER_PROTECTION.search(name) for name in mentioned):
+            has_protector = bool(_RAIN_GEAR.search(subject)) or any(
+                _WATER_PROTECTION.search(name) for name in mentioned
+            )
+            if mentioned and not has_protector:
                 return True
     return False
 

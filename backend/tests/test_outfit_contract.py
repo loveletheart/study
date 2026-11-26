@@ -218,6 +218,7 @@ class OutfitContractTests(unittest.TestCase):
             ("reasons", "가벼운 코트", "가벼운 코트는 비와 바람을 막아주며, 우산은 비를 효과적으로 방지합니다."),
             ("avoid_reasons", "가벼운 코트", "가벼운 코트는 비와 바람을 방지합니다."),
             ("reasons", "코트", "우산은 비를 막아 주고 코트도 비를 막아 줍니다."),
+            ("reasons", "코트", "우산은 비를 막아 주고 코트는 비에 젖지 않도록 보호해 줍니다."),
             ("avoid_reasons", "코트", "우산은 비를 막아 주고 코트도 비를 막아 줍니다."),
             ("reasons", "코트", "우산은 비를 막아 주지 않지만 코트는 비를 막아 줍니다."),
             ("reasons", "코트", "코트는 비를 막아 주고 우산은 비를 막아 주지 않습니다."),
@@ -246,7 +247,7 @@ class OutfitContractTests(unittest.TestCase):
                 self.assertIn("우비", first["rain_protection"])
                 self.assertIn(look, second["answer_checks"][0])
 
-    def test_rain_explanation_accepts_negated_protection_without_repair(self):
+    def test_rain_explanation_accepts_valid_protection_without_repair(self):
         day = replace(self.day, precipitation_mm=12, precipitation_probability_percent=80)
         recommender = OllamaOutfitRecommender(self.client, "test-model", repair_attempts=1)
         for field in ("reasons", "avoid_reasons"):
@@ -259,6 +260,8 @@ class OutfitContractTests(unittest.TestCase):
                 "코트는 비를 막아 주는 기능이 없고 우산은 비를 막아 줍니다.",
                 "우산은 비를 막아 주고 코트는 비를 막아 주는 기능이 없습니다.",
                 "우산은 비를 막아 주고 코트는 비를 막아 주지 않습니다.",
+                "우산은 비를 막아 주고 코트가 비에 젖지 않도록 보호해 줍니다.",
+                "우산은 비를 막고 코트가 비에 젖지 않도록 보호해 줍니다.",
             ):
                 with self.subTest(field=field, explanation=sentence):
                     self.client.reset_mock()
