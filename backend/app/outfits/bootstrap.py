@@ -43,13 +43,14 @@ def _cache_scope(settings: Settings, version: str) -> str:
     return hashlib.sha256(signature.encode()).hexdigest()
 
 
-def _local_timeout(settings: Settings) -> float:
-    """공통·개인 추천에 같은 로컬 대기 제한을 적용한다."""
+def _local_timeout(settings: Settings, *, weekly: bool = False) -> float:
+    """자동 전환 설정과 추천 길이에 맞는 로컬 대기 제한을 선택한다."""
     timeout = settings.llm_timeout_seconds
     if not settings.cloud_fallback_enabled:
         return timeout
     fallback_timeout = settings.fallback_local_timeout_seconds
-    return min(timeout, fallback_timeout if fallback_timeout is not None else 20.0)
+    default_timeout = 60.0 if weekly else 20.0
+    return min(timeout, fallback_timeout if fallback_timeout is not None else default_timeout)
 
 
 def _local_recommender(
@@ -60,6 +61,7 @@ def _local_recommender(
         settings.llm_base_url, timeout_seconds, settings.llm_context_size,
         today_context_size=settings.llm_today_context_size,
         thinking=settings.llm_thinking,
+        weekly_timeout_seconds=_local_timeout(settings, weekly=True),
         **_sampling_options(settings),
     )
     recorded = RecordingChatClient(client, feedback_store_for_path(settings.database_path), "ollama")

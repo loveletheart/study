@@ -26,7 +26,7 @@ from app.outfits.domain.models import (
     TemperatureBasis,
     OutfitPreferences,
 )
-from app.outfits.domain.clothing_style import conflicting_clothes
+from app.outfits.domain.clothing_style import avoided_clothes, conflicting_clothes
 from app.outfits.domain.rules import temperature_reference
 from app.outfits.infrastructure.schemas import GeneratedLook, GeneratedResponse
 from app.outfits.infrastructure.prompts import (
@@ -37,7 +37,7 @@ from app.outfits.infrastructure.prompts import (
     _personal_requirements,
 )
 from app.outfits.application.ports import OutfitRecommender
-from app.outfits.domain.quality import check_day
+from app.outfits.domain.quality import HOT_DAY_MINIMUM_C, check_day
 
 
 def _look(value: GeneratedLook) -> OutfitLook:
@@ -183,7 +183,17 @@ class PersonalizationChatClient:
         content["look_examples"] = [
             look for look in content["look_examples"]
             if not conflicting_clothes(look, self.preferences.clothing_preference)
+            and not avoided_clothes(look, self.preferences.avoid_items)
         ]
+        for day in content["weather_days"]:
+            if day["temperature_basis"] == TemperatureBasis.ACTUAL.value:
+                minimum, maximum = day["temperature_min_c"], day["temperature_max_c"]
+                day["temperature_evidence"] = (
+                    f"실제 기온 {minimum:g}~{maximum:g}°C를 사용하세요. "
+                    "제공되지 않은 체감온도를 이유에 넣지 마세요."
+                )
+                if minimum >= HOT_DAY_MINIMUM_C:
+                    day["temperature_evidence"] += " 최저기온도 높으므로 더운 날을 기준으로 설명하세요."
         contextual = [
             {"role": "system", "content": messages[0]["content"] + "\n" + PERSONALIZATION_INSTRUCTION},
             {"role": "user", "content": json.dumps(content, ensure_ascii=False, allow_nan=False, default=str)},

@@ -44,11 +44,13 @@ class OllamaClient:
     def __init__(
         self, base_url: str, timeout_seconds: float, context_size: int,
         today_context_size: int | None = None, thinking: bool | None = None,
-        *, temperature: float = 0.3, top_p: float | None = None, min_p: float | None = None,
+        *, weekly_timeout_seconds: float | None = None,
+        temperature: float = 0.3, top_p: float | None = None, min_p: float | None = None,
     ) -> None:
         """로컬 서버 주소와 추론 제한 설정"""
         self._url = base_url.rstrip("/") + "/api/chat"
         self._timeout_seconds = timeout_seconds
+        self._weekly_timeout_seconds = weekly_timeout_seconds
         self._context_size = context_size
         self._today_context_size = today_context_size
         self._thinking = thinking
@@ -60,9 +62,13 @@ class OllamaClient:
 
     def chat(self, model: str, messages: list[dict[str, str]], schema: dict) -> str:
         """JSON 스키마를 지정해 단일 비스트리밍 응답 조회"""
-        is_today = schema.get("properties", {}).get("days", {}).get("maxItems") == 1
+        day_count = schema.get("properties", {}).get("days", {}).get("maxItems")
+        is_today = day_count == 1
         context_size = self._today_context_size if is_today and self._today_context_size is not None else self._context_size
         max_output = min(8192, context_size // 2) if is_today and self._today_context_size is not None else 8192
+        timeout = self._timeout_seconds
+        if day_count is not None and day_count > 1 and self._weekly_timeout_seconds is not None:
+            timeout = self._weekly_timeout_seconds
         payload = {
             "model": model, "messages": messages, "format": schema, "stream": False,
             "options": {**self._sampling, "num_predict": max_output, "num_ctx": context_size},
@@ -74,7 +80,7 @@ class OllamaClient:
             headers={"Content-Type": "application/json", "Accept": "application/json"}, method="POST",
         )
         try:
-            with urlopen(request, timeout=self._timeout_seconds) as response:
+            with urlopen(request, timeout=timeout) as response:
                 body = response.read(MAX_RESPONSE_BYTES + 1)
         except HTTPError as exc:
             exc.close()
