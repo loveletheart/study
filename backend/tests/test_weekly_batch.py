@@ -66,6 +66,44 @@ class WeeklyBatchTests(unittest.TestCase):
         self.assertEqual(self.cache.run_weekly_batch()["generated"], 1)
         self.assertEqual(len(self.cache.get_region_weekly(99001, 37, 127).daily), 7)
 
+    def test_new_prompt_prepares_previous_weekly_targets_without_reusing_results(self):
+        region_id = 99001
+        preferences = (
+            OutfitPreferences(style=OutfitStyle.FORMAL), OutfitPreferences(style=OutfitStyle.CASUAL),
+        )
+        old_personalizer = Mock()
+        old_personalizer.personalize.side_effect = lambda base, conditions: base
+        old_personal = SQLitePersonalizedOutfitCache(
+            self.database_path, "personal-old", old_personalizer, self.cache, Mock(),
+            clock=lambda: self.fixture.now, weekly_batch_only=True,
+        )
+        for conditions in preferences:
+            old_personal.register(region_id, "weekly", conditions)
+        with self.assertRaises(WeeklyOutfitNotReadyError):
+            self.cache.get_region_weekly(region_id, 37, 127)
+        self.at(1)
+        self.assertEqual(self.cache.run_weekly_batch(on_ready=old_personal.prepare_weekly)["personalized_generated"], 2)
+
+        self.at(2)
+        new_cache = CachedOutfitService(
+            self.database_path, "batch-upgraded", self.factory, clock=lambda: self.fixture.now,
+            reuse_unchanged_weather=True, weekly_batch_only=True, previous_scope="batch-test",
+        )
+        new_personalizer = Mock()
+        new_personalizer.personalize.side_effect = lambda base, conditions: base
+        new_personal = SQLitePersonalizedOutfitCache(
+            self.database_path, "personal-new", new_personalizer, new_cache, Mock(),
+            clock=lambda: self.fixture.now, weekly_batch_only=True, previous_scope="personal-old",
+        )
+        new_personal.register(region_id, "weekly", preferences[0])
+        result = new_cache.run_weekly_batch(on_ready=new_personal.prepare_weekly)
+
+        self.assertEqual((result["status"], result["generated"], result["personalized_generated"]), ("completed", 1, 2))
+        self.assertEqual(self.service.get_weekly.call_count, 2)
+        self.assertCountEqual([call.args[1] for call in new_personalizer.personalize.call_args_list], preferences)
+        common = new_cache.get_region_weekly(region_id, 37, 127)
+        self.assertTrue(new_personal.get(region_id, "weekly", common, preferences[1], register=False)[1])
+
     def test_daily_claim_survives_restarts_and_prevents_duplicate_start(self):
         with self.assertRaises(WeeklyOutfitNotReadyError):
             self.cache.get_weekly(37, 127)

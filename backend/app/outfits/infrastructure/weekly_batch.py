@@ -39,9 +39,13 @@ class WeeklyBatchLeaseLostError(RuntimeError):
 
 
 class WeeklyBatchStore:
-    def __init__(self, database_path: Path, scope: str, clock: Callable[[], datetime]) -> None:
+    def __init__(
+        self, database_path: Path, scope: str, clock: Callable[[], datetime],
+        *, previous_scope: str | None = None,
+    ) -> None:
         self._database_path = database_path
         self._scope = scope
+        self._previous_scope = previous_scope
         self._clock = clock
         with closing(connect_database(database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -126,9 +130,9 @@ class WeeklyBatchStore:
         self, connection: Connection, timestamp: float, legacy_started_at: float | None,
     ) -> list[WeeklyBatchTarget]:
         rows = connection.execute(
-            "SELECT kind, latitude, longitude, requested_at, updated_at FROM outfit_result_cache "
-            "WHERE scope=? AND requested_at>=? ORDER BY requested_at DESC, kind, latitude, longitude",
-            (self._scope, timestamp - 86400),
+            "SELECT scope, kind, latitude, longitude, requested_at, updated_at FROM outfit_result_cache "
+            "WHERE scope IN (?, ?) AND requested_at>=? ORDER BY requested_at DESC, kind, latitude, longitude",
+            (self._scope, self._previous_scope, timestamp - 86400),
         ).fetchall()
         targets: dict[CacheKey, float] = {}
         ready: set[CacheKey] = set()
@@ -138,7 +142,7 @@ class WeeklyBatchStore:
             key = (self._scope, weekly_kind, row["latitude"], row["longitude"])
             targets.setdefault(key, row["requested_at"])
             if (
-                kind == "weekly" and legacy_started_at is not None
+                row["scope"] == self._scope and kind == "weekly" and legacy_started_at is not None
                 and row["updated_at"] is not None and row["updated_at"] >= legacy_started_at
             ):
                 ready.add(key)

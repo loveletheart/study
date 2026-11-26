@@ -12,32 +12,43 @@ from app.outfits.domain.rules import temperature_reference
 
 
 # 프롬프트 버전
-PROMPT_VERSION = "2.3"
-PERSONALIZATION_VERSION = "2.8"
+PROMPT_VERSION = "2.4"
+PERSONALIZATION_VERSION = "2.9"
 
 
 # 기본 추천 프롬프트
 SYSTEM_PROMPT = """제공된 날씨와 명시한 사용자 요구만 사용해 실용적인 옷차림을 추천하세요. 자연스러운 한국어로 작성하세요.
 입력 날짜·개수·순서를 유지하고 output_schema에 맞는 JSON 객체만 반환하세요. Markdown, 추가 필드, 날씨 데이터는 반환하지 마세요.
 실제로 흔히 쓰는 의류명을 사용하고 필드마다 한 가지를 선택하세요. 이유는 의류명 안이 아니라 reasons/avoid_reasons에 작성하세요.
+모든 날짜의 best와 worst에서 값이 있는 top, bottom, outerwear, one_piece의 이름에 대표 바탕색과 눈에 보이는 디자인 특징을 함께 쓰세요.
+검정, 흰색, 네이비, 베이지, 아이보리, 차콜, 회색, 카키, 하늘색, 파랑, 초록, 버건디, 빨강, 분홍, 갈색, 노랑 중 하나를 사용하세요.
+상의와 원피스·점프수트는 의류에 맞는 네크라인이나 칼라를 하나 고르고 반팔·긴팔·민소매처럼 소매 형태도 적으세요.
+- 크루넥(라운드넥)은 둥근 목선, 브이넥은 V자 목선입니다.
+- 터틀넥(목폴라)은 목을 감싸고, 모크넥은 목선이 살짝 올라옵니다.
+- 오프숄더는 어깨를 드러내고, 보트넥은 쇄골을 따라 넓게 이어지며, 스퀘어넥은 각진 목선입니다.
+- 칼라(카라)가 있는 옷은 셔츠 칼라, 폴로 칼라, 스탠드 칼라처럼 구체적인 이름을 쓰세요.
+하의는 일자핏·와이드핏·테이퍼드핏, 투턱·플리츠·플레어처럼 핏이나 디테일을 고르고 긴바지·반바지·미디 스커트처럼 기장을 드러내세요.
+겉옷은 싱글버튼·더블버튼·지퍼 여밈·벨트형처럼 실제 디자인을 구체적으로 쓰세요. 원피스에는 플레어·셔츠형처럼 어울리는 실루엣을 더할 수 있습니다.
+줄무늬나 체크가 어울리면 의류명에 넣고, 무늬 없는 조합도 허용합니다. 신발과 준비물에는 로우컷 운동화, 접이식 우산처럼 구체적인 형태를 쓰세요.
+색상과 디자인은 기존 의류명 필드 안에 쓰고 별도 필드를 추가하지 마세요.
 separates는 top과 bottom을 채우고 one_piece는 JSON null로 두세요. one_piece는 원피스/점프수트를 채우고 top과 bottom은 JSON null로 두세요.
 의류명에 "null", "none", "없음" 같은 자리 채우기 문자열을 쓰지 마세요. 허용된 필드에서만 실제 null을 사용하세요.
 outerwear는 상체를 덮는 겉옷, shoes는 신발, accessories는 장갑이나 우산 같은 작은 준비물이며 주요 의류가 아닙니다.
-best는 날씨와 사람에게 적합해야 합니다. worst는 실제로 부적절한 별개의 옷차림이어야 합니다.
+best는 날씨와 사람에게 적합해야 합니다. worst는 색상만 바꾼 조합을 피하고, 날씨나 활동에 실제로 부적절한 별개의 옷차림을 고르세요.
 reasons는 best만, avoid_reasons는 worst만 설명하세요. 각각 짧고 구체적인 문장 1~2개와 유용한 주의사항 0~2개를 작성하세요.
 temperature_*는 실제 기온이고 apparent_temperature_*는 체감온도입니다. temperature_labels_ko는 이 사실을 한국어 라벨로 반복합니다.
 reference_temperature_c는 temperature_basis에 따른 최고값이며 최저값이나 하루 종일의 온도가 아닙니다. 실제 기온과 체감온도를 구분하세요.
 하루 전체 기온 범위, 특히 추운 아침과 야외 노출을 고려하세요. 체감온도에 바람의 냉각 효과를 다시 더하지 마세요.
 더위에는 통기성 있는 가벼운 옷을, 추위에는 적절한 보온을 선택하세요. 습도·예보·의류 특성·개인 정보를 지어내지 마세요. 날씨의 null은 0이 아니라 알 수 없음입니다.
-look_examples는 필드 구성만 보여줍니다. 현재 날씨와 요청에 맞게 의류를 선택하고 조합과 설명을 자연스럽게 다양하게 작성하세요."""
+look_examples는 필드 구성과 이름의 작성 방식 예시입니다. 현재 날씨와 요청에 맞게 의류를 선택하고 조합과 설명을 자연스럽게 다양하게 작성하세요."""
 
 
 # 출력 형식 예시
 LOOK_EXAMPLES = (
-    {"outfit_type": "separates", "top": "셔츠", "bottom": "면바지", "one_piece": None,
-     "outerwear": "재킷", "shoes": "운동화", "accessories": ["우산"]},
-    {"outfit_type": "one_piece", "top": None, "bottom": None, "one_piece": "면 원피스",
-     "outerwear": None, "shoes": "샌들", "accessories": ["모자"]},
+    {"outfit_type": "separates", "top": "네이비 줄무늬 크루넥 긴팔 티셔츠", "bottom": "베이지 투턱 일자핏 긴바지", "one_piece": None,
+     "outerwear": "카키 싱글버튼 트렌치코트", "shoes": "흰색 로우컷 운동화", "accessories": ["검정 접이식 우산"]},
+    {"outfit_type": "one_piece", "top": None, "bottom": None, "one_piece": "검정 체크 스퀘어넥 긴팔 플레어 원피스",
+     "outerwear": None, "shoes": "갈색 스트랩 샌들", "accessories": ["아이보리 버킷햇"]},
 )
 
 

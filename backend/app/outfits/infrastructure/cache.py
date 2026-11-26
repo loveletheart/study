@@ -120,6 +120,7 @@ class CachedOutfitService:
         max_entries: int = 128,
         weekly_batch_only: bool = False, weekly_batch_hour: int = 1, weekly_max_age_seconds: float = 172800,
         weather_refresh_workers: int = 4,
+        *, previous_scope: str | None = None,
     ) -> None:
         """저장 경로와 갱신 주기를 설정한다."""
         self._database_path = database_path
@@ -149,7 +150,7 @@ class CachedOutfitService:
                 )
             if "prepared_for" not in columns:
                 connection.execute("ALTER TABLE outfit_result_cache ADD COLUMN prepared_for REAL NOT NULL DEFAULT 0")
-        self._weekly_batch = WeeklyBatchStore(database_path, scope, self._clock)
+        self._weekly_batch = WeeklyBatchStore(database_path, scope, self._clock, previous_scope=previous_scope)
 
     def get_today(self, latitude: float, longitude: float) -> TodayOutfitResult:
         """오늘 추천을 재사용하고 저장된 결과가 없을 때만 생성한다."""
@@ -585,6 +586,7 @@ class SQLitePersonalizedOutfitCache:
         common: CachedOutfitService, locations: LocationReader, lead_seconds: float = 600,
         clock: Callable[[], datetime] | None = None, max_entries: int = 4096,
         weekly_batch_only: bool = False,
+        *, previous_scope: str | None = None,
     ) -> None:
         """조건 조합을 저장하고 사용자 식별자 없이 같은 조건의 결과를 공유"""
         self._database_path = database_path
@@ -596,6 +598,7 @@ class SQLitePersonalizedOutfitCache:
         self._clock = clock or (lambda: datetime.now(KST))
         self._max_entries = max_entries
         self._weekly_batch_only = weekly_batch_only
+        self._previous_scope = previous_scope
         self._locks: WeakValueDictionary[str, LockType] = WeakValueDictionary()
         self._guard = Lock()
         with closing(connect_database(database_path)) as connection, connection:
@@ -739,8 +742,9 @@ class SQLitePersonalizedOutfitCache:
         with closing(connect_database(self._database_path)) as connection:
             targets = connection.execute(
                 "SELECT preferences FROM outfit_personal_targets "
-                "WHERE scope=? AND location_id=? AND kind='weekly' AND requested_at>=? ORDER BY requested_at DESC",
-                (self._scope, region_id, self._clock().timestamp() - 86400),
+                "WHERE scope IN (?, ?) AND location_id=? AND kind='weekly' AND requested_at>=? "
+                "GROUP BY preferences ORDER BY MAX(requested_at) DESC",
+                (self._scope, self._previous_scope, region_id, self._clock().timestamp() - 86400),
             ).fetchall()
         generated, failed, retryable_failed = 0, 0, 0
         for target in targets:

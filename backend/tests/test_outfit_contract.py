@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -329,6 +330,36 @@ class OutfitContractTests(unittest.TestCase):
         self.assertEqual(labels["실제기온_최고_C"], self.day.temperature_max_c)
         self.assertIsNone(labels["체감온도_최고_C"])
         self.assertIn("description", schema["$defs"]["GeneratedLook"]["properties"]["shoes"])
+
+    def test_common_and_personal_prompts_request_colors_and_designs_for_today_and_weekly(self):
+        for count in (1, 7):
+            days = tuple(replace(self.day, date=self.day.date + timedelta(days=index)) for index in range(count))
+            payload = json.loads(generated_content([day.date.isoformat() for day in days]))
+            for day in payload["days"]:
+                day.update(best=LOOK_EXAMPLES[0], worst=LOOK_EXAMPLES[1])
+            self.client.chat.return_value = json.dumps(payload)
+            personal = OllamaOutfitRecommender(
+                PersonalizationChatClient(self.client, OutfitPreferences()), "test-model",
+            )
+            for recommender in (self.recommender, GeminiOutfitRecommender(self.client, "test-cloud"), personal):
+                with self.subTest(days=count, client=type(recommender).__name__, personal=recommender is personal):
+                    generated = recommender.recommend(days)
+                    _, messages, _ = self.client.chat.call_args.args
+                    self.assertIn("best와 worst", messages[0]["content"])
+                    self.assertIn("top, bottom, outerwear, one_piece의 이름에 대표 바탕색과 눈에 보이는 디자인 특징", messages[0]["content"])
+                    self.assertIn("상의와 원피스·점프수트는 의류에 맞는 네크라인이나 칼라", messages[0]["content"])
+                    self.assertIn("크루넥(라운드넥)", messages[0]["content"])
+                    self.assertIn("셔츠 칼라, 폴로 칼라, 스탠드 칼라", messages[0]["content"])
+                    self.assertIn("줄무늬나 체크", messages[0]["content"])
+                    self.assertIn("무늬 없는 조합도 허용", messages[0]["content"])
+                    self.assertEqual(json.loads(messages[1]["content"])["look_examples"], list(LOOK_EXAMPLES))
+                    self.assertEqual(len(generated.recommendations), count)
+                    for recommendation in generated.recommendations:
+                        self.assertEqual(recommendation.best.top, "네이비 줄무늬 크루넥 긴팔 티셔츠")
+                        self.assertEqual(recommendation.best.bottom, "베이지 투턱 일자핏 긴바지")
+                        self.assertEqual(recommendation.best.outerwear, "카키 싱글버튼 트렌치코트")
+                        self.assertEqual(recommendation.best.shoes, "흰색 로우컷 운동화")
+                        self.assertEqual(recommendation.worst.one_piece, "검정 체크 스퀘어넥 긴팔 플레어 원피스")
 
     def test_sampling_changes_separate_common_and_personal_cache_scopes(self):
         with tempfile.TemporaryDirectory() as directory, patch("app.outfits.bootstrap.get_sigungu_resolver", return_value=Mock()):
