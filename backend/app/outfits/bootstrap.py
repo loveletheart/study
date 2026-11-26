@@ -27,15 +27,20 @@ from app.outfits.infrastructure.feedback import RecordingChatClient
 from app.weather.bootstrap import get_location_catalog, get_sigungu_resolver, get_weather_service
 
 
+_COMMON_CACHE_VERSION = "outfit-cache-v2-sigungu"
+_PREVIOUS_PROMPT_VERSION = "2.3"
+_PREVIOUS_PERSONALIZATION_VERSION = "2.8"
+
+
 def _sampling_options(settings: Settings) -> dict:
     """생성 클라이언트와 캐시가 같은 샘플링 설정을 사용한다."""
     return {"temperature": settings.llm_temperature, "top_p": settings.llm_top_p, "min_p": settings.llm_min_p}
 
 
-def _cache_scope(settings: Settings, version: str) -> str:
+def _cache_scope(settings: Settings, version: str, *, prompt_version: str = PROMPT_VERSION) -> str:
     """기존 순서를 유지해 공통·개인 캐시가 같은 생성 설정을 구분한다."""
     signature = json.dumps([
-        version, PROMPT_VERSION, settings.llm_base_url, settings.llm_model,
+        version, prompt_version, settings.llm_base_url, settings.llm_model,
         settings.llm_context_size, settings.cloud_fallback_enabled, settings.gemini_model,
         settings.llm_today_context_size, settings.llm_thinking, settings.gemini_max_output_tokens,
         _sampling_options(settings),
@@ -106,13 +111,14 @@ def get_cached_outfit_service() -> CachedOutfitService:
     """같은 모델·프롬프트 설정의 추천을 서버 재시작 후에도 공유"""
     settings = get_settings()
     return CachedOutfitService(
-        settings.database_path, _cache_scope(settings, "outfit-cache-v2-sigungu"),
+        settings.database_path, _cache_scope(settings, _COMMON_CACHE_VERSION),
         get_outfit_service, settings.outfit_refresh_seconds,
         reuse_unchanged_weather=True,
         max_entries=settings.outfit_cache_max_entries,
         weekly_batch_only=True, weekly_batch_hour=settings.outfit_weekly_batch_hour,
         weekly_max_age_seconds=settings.outfit_weekly_max_age_seconds,
         weather_refresh_workers=settings.outfit_weather_refresh_workers,
+        previous_scope=_cache_scope(settings, _COMMON_CACHE_VERSION, prompt_version=_PREVIOUS_PROMPT_VERSION),
     )
 
 
@@ -145,6 +151,9 @@ def get_personalized_outfit_cache() -> SQLitePersonalizedOutfitCache:
         LlmOutfitPersonalizer(_personal_recommender),
         get_cached_outfit_service(), get_sigungu_resolver(), max_entries=settings.outfit_cache_max_entries,
         weekly_batch_only=True,
+        previous_scope=_cache_scope(
+            settings, _PREVIOUS_PERSONALIZATION_VERSION, prompt_version=_PREVIOUS_PROMPT_VERSION,
+        ),
     )
 
 
