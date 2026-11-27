@@ -183,6 +183,23 @@ for (const signedIn of [true, false]) {
   })
 }
 
+test('입력 이벤트 없이 채워진 로그인 정보를 화면 값 그대로 전송한다', async ({ page }) => {
+  await mockAccount(page, { profileReady: true })
+  await page.goto('./#login')
+  // 자동완성이 입력 이벤트 없이 값을 채운 뒤 화면이 갱신되는 상황을 재현합니다.
+  await page.getByRole('textbox', { name: '이메일', exact: true }).evaluate((field, value) => {
+    field.value = value
+  }, user.email)
+  await page.getByLabel('비밀번호', { exact: true }).evaluate((field, value) => {
+    field.value = value
+  }, password)
+  await page.getByRole('button', { name: '비밀번호 표시', exact: true }).click()
+  const request = page.waitForRequest('**/api/v1/users/auth/login')
+  await page.getByRole('button', { name: '로그인하기', exact: true }).click()
+  expect((await request).postDataJSON()).toEqual({ email: user.email, password })
+  await expect(page).not.toHaveURL(/#login$/)
+})
+
 async function openSignup(page) {
   await page.goto('./#signup')
   await page.getByRole('textbox', { name: '닉네임', exact: true }).fill('온도친구')

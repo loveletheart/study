@@ -8,29 +8,28 @@ const emit = defineEmits<{
   navigate: [view: 'home' | 'login' | 'register']
 }>()
 const name = ref('')
-const email = ref('')
-const password = ref('')
-const confirm = ref('')
+const passwordInput = ref<HTMLInputElement | null>(null)
 const showPassword = ref(false)
 const validation = ref('')
 watch(
   () => props.mode,
   () => {
-    password.value = ''
-    confirm.value = ''
+    if (passwordInput.value) passwordInput.value.value = ''
     validation.value = ''
   },
 )
-function submit() {
+function submit(event: SubmitEvent) {
+  const fields = new FormData(event.currentTarget as HTMLFormElement)
+  const password = String(fields.get('password') ?? '')
   validation.value = ''
-  if (props.mode === 'register' && password.value !== confirm.value) {
+  if (props.mode === 'register' && password !== fields.get('confirm')) {
     validation.value = '비밀번호가 서로 달라요. 다시 확인해 주세요.'
     return
   }
   emit('submit', {
-    email: email.value.trim(),
-    password: password.value,
-    ...(props.mode === 'register' ? { name: name.value.trim() } : {}),
+    email: String(fields.get('email') ?? '').trim(),
+    password,
+    ...(props.mode === 'register' ? { name: String(fields.get('name') ?? '').trim() } : {}),
   })
 }
 </script>
@@ -89,7 +88,6 @@ function submit() {
                 placeholder="어떻게 불러드릴까요?" /></label
             ><label class="input-label"
               >이메일<input
-                v-model="email"
                 type="email"
                 name="email"
                 autocomplete="username"
@@ -101,7 +99,7 @@ function submit() {
               <label for="auth-password">비밀번호</label>
               <div class="password-field">
                 <input
-                  v-model="password"
+                  ref="passwordInput"
                   id="auth-password"
                   :type="showPassword ? 'text' : 'password'"
                   name="password"
@@ -125,7 +123,6 @@ function submit() {
             </div>
             <label v-if="mode === 'register'" class="input-label"
               >비밀번호 확인<input
-                v-model="confirm"
                 type="password"
                 name="confirm"
                 autocomplete="new-password"
