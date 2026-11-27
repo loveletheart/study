@@ -1,6 +1,7 @@
 """오늘 문맥 분리와 야간 전용 주간 배치 정책의 회귀 검증."""
 
 # 표준 라이브러리
+import json
 import os
 import tempfile
 import unittest
@@ -16,7 +17,7 @@ from app.common.config import get_settings
 from app.common.database import connect_database
 from app.outfits.application.exceptions import OutfitLlmTimeoutError, WeeklyOutfitNotReadyError
 from app.outfits.application.services import RegionOutfitService
-from app.outfits.domain.models import OutfitPreferences, OutfitStyle
+from app.outfits.domain.models import ClothingPreference, OutfitPreferences, OutfitStyle
 from app.outfits.infrastructure.clients import OllamaClient
 from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache, CachedOutfitService
 from app.outfits.presentation.schemas import WeeklyOutfitResponse
@@ -65,6 +66,48 @@ class WeeklyBatchTests(unittest.TestCase):
         self.at(1)
         self.assertEqual(self.cache.run_weekly_batch()["generated"], 1)
         self.assertEqual(len(self.cache.get_region_weekly(99001, 37, 127).daily), 7)
+
+    def test_personal_results_recheck_clothing_when_reading_existing_cache(self):
+        region_id = 99001
+        preferences = OutfitPreferences(clothing_preference=ClothingPreference.MENSWEAR)
+        personalizer = Mock()
+        personalizer.personalize.side_effect = lambda base, conditions: base
+        personal = SQLitePersonalizedOutfitCache(
+            self.database_path, "personal", personalizer, self.cache, Mock(),
+            clock=lambda: self.fixture.now, weekly_batch_only=True,
+        )
+        today = self.cache.get_region_today(region_id, 37, 127)
+        personal.get(region_id, "today", today, preferences)
+        personal.register(region_id, "weekly", preferences)
+        self.at(1)
+        self.cache.run_weekly_batch(on_ready=personal.prepare_weekly)
+        weekly = self.cache.get_region_weekly(region_id, 37, 127)
+        self.assertTrue(personal.get(region_id, "today", today, preferences)[1])
+        self.assertTrue(personal.get(region_id, "weekly", weekly, preferences)[1])
+
+        with closing(connect_database(self.database_path)) as connection, connection:
+            rows = connection.execute("SELECT cache_key, payload FROM outfit_personal_results").fetchall()
+            self.assertEqual(len(rows), 2)
+            for row in rows:
+                payload = json.loads(row["payload"])
+                recommendations = payload["generated"]["recommendations"]
+                worst = recommendations[-1]["worst"]
+                if len(recommendations) == 1:
+                    worst["top"] = "흰색 (여성) 블라우스"
+                else:
+                    worst.update(outfit_type="one_piece", top=None, bottom=None, one_piece="흰색 드레스 셔츠")
+                connection.execute(
+                    "UPDATE outfit_personal_results SET payload=? WHERE cache_key=?",
+                    (json.dumps(payload), row["cache_key"]),
+                )
+        personalizer.reset_mock()
+
+        self.assertFalse(personal.get(region_id, "today", today, preferences)[1])
+        with self.assertRaises(WeeklyOutfitNotReadyError):
+            personal.get(region_id, "weekly", weekly, preferences)
+        personalizer.personalize.assert_called_once()
+        self.assertFalse(personal.get(region_id, "weekly", weekly, preferences, from_weekly_batch=True)[1])
+        self.assertTrue(personal.get(region_id, "weekly", weekly, preferences)[1])
 
     def test_new_prompt_prepares_previous_weekly_targets_without_reusing_results(self):
         region_id = 99001

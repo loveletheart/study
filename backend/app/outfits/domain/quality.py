@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass
 
-from app.outfits.domain.clothing_style import avoided_clothes, conflicting_clothes
+from app.outfits.domain.clothing_style import avoided_clothes, conflicting_clothes, is_one_piece_clothing
 
 
 HOT_DAY_MINIMUM_C = 27
@@ -91,7 +91,7 @@ def check_day(day: dict, weather: dict, preferences: dict | None = None) -> dict
         bottom = outfit.get('bottom') or ''
         if bottom and re.search('상의|티셔츠|니트|재킷|점퍼', bottom) and not re.search('바지|팬츠|슬랙스|스커트|치마', bottom):
             errors.append(QualityIssue('clothing_category', f'{label}의 하의에 상의가 들어 있습니다.'))
-        if outfit.get('outfit_type') == 'one_piece' and not re.search('원피스|드레스|점프수트', outfit.get('one_piece') or ''):
+        if outfit.get('outfit_type') == 'one_piece' and not is_one_piece_clothing(outfit.get('one_piece')):
             errors.append(QualityIssue('clothing_category', f'{label}의 원피스 항목에는 원피스·드레스·점프수트만 넣어 주세요.'))
         names = ' '.join(str(value) for value in outfit.values())
         if re.search('반팔.{0,3}긴팔|반팔.{0,3}긴소매|긴팔.{0,3}반팔', names):

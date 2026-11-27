@@ -44,7 +44,8 @@ from app.outfits.application.exceptions import (
 from app.outfits.application.services import OutfitService
 from app.weather.domain.models import KST
 from app.outfits.application.ports import OutfitPersonalizer
-from app.outfits.domain.models import OutfitPreferences
+from app.outfits.domain.clothing_style import conflicting_clothes, is_one_piece_clothing
+from app.outfits.domain.models import ClothingPreference, OutfitPreferences, OutfitType
 from app.weather.application.ports import LocationReader
 from app.weather.application.exceptions import (
     WeatherProviderTimeoutError,
@@ -109,6 +110,16 @@ def _dump_result(result: OutfitResult) -> bytes:
     if isinstance(result, TodayOutfitResult):
         return TODAY_ADAPTER.dump_json(result)
     return WEEKLY_ADAPTER.dump_json(result)
+
+
+def _valid_personal_clothing(generated: GeneratedOutfits, preference: ClothingPreference) -> bool:
+    """개인 추천의 스타일과 원피스 항목을 저장 전과 재조회 시 검사한다."""
+    return all(
+        not conflicting_clothes(asdict(look), preference)
+        and (look.outfit_type != OutfitType.ONE_PIECE or is_one_piece_clothing(look.one_piece))
+        for day in generated.recommendations
+        for look in (day.best, day.worst)
+    )
 
 
 # 공통 추천 캐시
@@ -668,7 +679,9 @@ class SQLitePersonalizedOutfitCache:
             if row is not None:
                 try:
                     cached = PERSONAL_ADAPTER.validate_json(row["payload"])
-                    if cached.base_version == base_version:
+                    if cached.base_version == base_version and _valid_personal_clothing(
+                        cached.generated, preferences.clothing_preference,
+                    ):
                         return cached, True
                 except ValidationError:
                     pass
@@ -679,6 +692,8 @@ class SQLitePersonalizedOutfitCache:
                     check_lease(connection)
             generated = self._personalizer.personalize(GeneratedOutfits(recommendations, base.engine), preferences)
             if tuple(item.weather for item in generated.recommendations) != tuple(item.weather for item in recommendations):
+                raise OutfitLlmResponseError()
+            if not _valid_personal_clothing(generated, preferences.clothing_preference):
                 raise OutfitLlmResponseError()
             result = PersonalizedOutfits(generated, self._clock(), uuid4().hex, base_version)
             with closing(connect_database(self._database_path)) as connection, connection:
