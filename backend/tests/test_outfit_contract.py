@@ -103,25 +103,47 @@ class OutfitContractTests(unittest.TestCase):
 
     def test_personalized_outfits_reject_explicit_opposite_style_and_keep_shared_items(self):
         for style, conflicting_names in (
-            (ClothingPreference.WOMENSWEAR, ("남성 린넨 재킷", "남성 전용 재킷", "Men\u2019s jacket")),
-            (ClothingPreference.MENSWEAR, ("여성 린넨 재킷", "여성 전용 재킷", "Women's jacket", "원 피스", "high heels")),
+            (ClothingPreference.WOMENSWEAR, ("남성 린넨 재킷", "남성 전용 재킷", "Men\u2019s jacket", "네이비 남성 재킷")),
+            (ClothingPreference.MENSWEAR, ("여성 린넨 재킷", "여성 전용 재킷", "Women's jacket",
+                                          "원 피스", "high heels", "흰색 여성 블라우스")),
         ):
             preferences = OutfitPreferences(clothing_preference=style)
             recommender = OllamaOutfitRecommender(
                 PersonalizationChatClient(self.client, preferences), "test-model",
             )
-            payload = self.payload()
-            look = payload["days"][0]["best"]
-            for name in conflicting_names:
-                with self.subTest(preference=style, item=name):
-                    look["outerwear"] = name
-                    self.client.chat.return_value = json.dumps(payload)
-                    with self.assertRaises(OutfitLlmResponseError):
-                        recommender.recommend((self.day,))
+            for side in ("best", "worst"):
+                for name in conflicting_names:
+                    with self.subTest(preference=style, side=side, item=name):
+                        payload = self.payload()
+                        payload["days"][0][side]["outerwear"] = name
+                        self.client.chat.return_value = json.dumps(payload)
+                        with self.assertRaises(OutfitLlmResponseError):
+                            recommender.recommend((self.day,))
 
-            look["outerwear"] = "공용 재킷"
-            self.client.chat.return_value = json.dumps(payload)
-            self.assertEqual(recommender.recommend((self.day,)).recommendations[0].best.outerwear, "공용 재킷")
+            for name in ("공용 재킷", "네이비 남성·여성 공용 재킷", "남녀 공용 재킷"):
+                with self.subTest(preference=style, shared=name):
+                    payload = self.payload()
+                    payload["days"][0]["best"]["outerwear"] = name
+                    self.client.chat.return_value = json.dumps(payload)
+                    self.assertEqual(recommender.recommend((self.day,)).recommendations[0].best.outerwear, name)
+
+    def test_one_piece_label_rejects_dress_shirts_and_shoes_but_keeps_valid_types(self):
+        for name in ("흰색 남성용 드레스 셔츠", "검정 드레스 구두", "navy dress shirt", "brown dress shoes"):
+            with self.subTest(name=name), self.assertRaises(OutfitLlmResponseError):
+                payload = self.payload()
+                payload["days"][0]["best"] = dress(name)
+                self.client.chat.return_value = json.dumps(payload)
+                self.recommender.recommend((self.day,))
+
+        for name in ("검정 체크 원피스", "공용 점프슈트", "khaki jumpsuit"):
+            with self.subTest(name=name):
+                payload = self.payload()
+                payload["days"][0]["best"] = dress(name)
+                payload["days"][0]["worst"]["top"] = "흰색 드레스 셔츠"
+                self.client.chat.return_value = json.dumps(payload)
+                recommendation = self.recommender.recommend((self.day,)).recommendations[0]
+                self.assertEqual(recommendation.best.one_piece, name)
+                self.assertEqual(recommendation.worst.top, "흰색 드레스 셔츠")
 
     def test_personalized_avoid_items_trigger_repair_for_best_only(self):
         preferences = OutfitPreferences(avoid_items=tuple(AvoidItem))
