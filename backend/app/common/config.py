@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
+from uuid import UUID
 
 # 외부 라이브러리
 from dotenv import dotenv_values
@@ -53,6 +54,7 @@ class Settings:
     outfit_weather_refresh_workers: int = 4
     weather_redis_url: str = field(default="", repr=False)
     weather_cache_stale_max_seconds: float = 10800.0
+    admin_user_ids: frozenset[UUID] = frozenset()
 
 
 # 설정값 검증
@@ -118,6 +120,12 @@ def get_settings() -> Settings:
         values, "STUDY_SESSION_IDLE_SECONDS", min(DEFAULT_SESSION_IDLE_SECONDS, session_max_age), 1, session_max_age,
     )
     weather_cache_ttl = _number_setting(values, "STUDY_WEATHER_CACHE_TTL_SECONDS", 3600, 0, 3600)
+    try:
+        admin_user_ids = frozenset(
+            UUID(part.strip()) for part in (values.get("STUDY_ADMIN_USER_IDS") or "").split(",") if part.strip()
+        )
+    except ValueError as exc:
+        raise ValueError("STUDY_ADMIN_USER_IDS must contain comma-separated user UUIDs.") from exc
     return Settings(
         app_name=values.get("STUDY_APP_NAME") or "Study API",
         database_path=database_path,
@@ -158,4 +166,5 @@ def get_settings() -> Settings:
         session_cookie_secure=_boolean_setting(values, "STUDY_SESSION_COOKIE_SECURE"),
         session_max_age_seconds=session_max_age,
         session_idle_seconds=session_idle,
+        admin_user_ids=admin_user_ids,
     )

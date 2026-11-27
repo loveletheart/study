@@ -20,6 +20,7 @@ export interface Preferences {
 export interface Account {
   user: { id: string; name: string; email: string }
   profile: { location: Location | null; preferences: Preferences }
+  is_admin: boolean
 }
 export interface ProfileInput {
   name: string
@@ -198,4 +199,20 @@ export function validateFeedbackEdit(edit: FeedbackEdit): string {
   )
     return '이유와 주의 사항은 항목마다 1~500자로 작성해 주세요.'
   return ''
+}
+export interface AdminOverview {
+  registered_accounts: number
+  feedback: {
+    reported: number
+    draft: number
+    approved: number
+    rejected: number
+  }
+  weekly_batch: {
+    run_date: string
+    status: string
+    pending: number
+    completed: number
+    failed: number
+  } | null
 }

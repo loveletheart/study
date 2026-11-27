@@ -39,6 +39,7 @@ from app.outfits.bootstrap import (
     get_weekly_outfit_batch,
 )
 from app.outfits.infrastructure.jobs import OutfitRefreshWorker
+from app.users.presentation.admin_router import router as admin_router
 from app.users.presentation.router import router as users_router
 from app.weather.presentation.router import router as weather_router
 
@@ -77,12 +78,14 @@ app = FastAPI(
         {"name": "weather", "description": "국내 지역 검색과 한국 시간 기준 오늘·7일 예보 조회"},
         {"name": "outfits", "description": "날씨 기반 오늘·7일 옷차림과 추천 이유"},
         {"name": "users", "description": "회원가입·로그인·세션 종료와 본인의 추천 프로필 관리"},
+        {"name": "admin", "description": "관리자 페이지 접근 권한 확인"},
         {"name": "system", "description": "서비스 안내와 서버 응답 상태 확인"},
     ],
 )
 # 예외 처리기와 업무별 라우터 등록
 register_exception_handlers(app)
 app.include_router(users_router, prefix="/api/v1")
+app.include_router(admin_router, prefix="/api/v1")
 app.include_router(weather_router, prefix="/api/v1")
 app.include_router(outfits_router, prefix="/api/v1")
 

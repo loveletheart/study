@@ -16,7 +16,7 @@ from app.users.domain.entities import User
 from app.users.domain.exceptions import DuplicateEmailError
 from app.users.domain.exceptions import InvalidUserError
 from app.users.application.dto import AccountDTO, RecommendationProfile
-from app.users.application.exceptions import AuthenticationRequiredError, InvalidCredentialsError
+from app.users.application.exceptions import AuthenticationRequiredError, AuthorizationError, InvalidCredentialsError
 from app.users.application.ports import AuthStore, PasswordSecurity
 from app.weather.application.ports import LocationCatalog
 
@@ -51,10 +51,12 @@ class AuthService:
         clock: Callable[[], float] = time.time, *,
         max_age_seconds: int = DEFAULT_SESSION_MAX_AGE_SECONDS,
         idle_seconds: int = DEFAULT_SESSION_IDLE_SECONDS,
+        admin_user_ids: frozenset[UUID] = frozenset(),
     ) -> None:
         self._store, self._passwords, self._locations, self._clock = store, passwords, locations, clock
         self._max_age_seconds = max_age_seconds
         self._idle_seconds = idle_seconds
+        self._admin_user_ids = admin_user_ids
 
     @property
     def session_max_age_seconds(self) -> int:
@@ -103,7 +105,15 @@ class AuthService:
     def _account(self, user: User) -> AccountDTO:
         profile = self._store.profile(user.id)
         location = self._locations.get(profile.location_id) if profile.location_id is not None else None
-        return AccountDTO(UserDTO.from_entity(user), location, profile.preferences)
+        return AccountDTO(UserDTO.from_entity(user), location, profile.preferences, is_admin=self._is_admin(user))
+
+    def _is_admin(self, user: User) -> bool:
+        return user.id in self._admin_user_ids
+
+    def require_admin(self, token: str | None) -> None:
+        """유효한 세션이 설정된 관리자 계정에 속하는지 확인한다."""
+        if not self._is_admin(self.authenticate(token)):
+            raise AuthorizationError()
 
     def me(self, token: str | None) -> AccountDTO:
         return self._account(self.authenticate(token))

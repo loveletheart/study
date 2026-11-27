@@ -39,3 +39,28 @@ class AccountDTO:
     user: UserDTO
     location: Location | None
     preferences: OutfitPreferences
+    is_admin: bool = False
+
+
+@dataclass(frozen=True)
+class FeedbackOverview:
+    reported: int
+    draft: int
+    approved: int
+    rejected: int
+
+
+@dataclass(frozen=True)
+class WeeklyBatchOverview:
+    run_date: str
+    status: str
+    pending: int
+    completed: int
+    failed: int
+
+
+@dataclass(frozen=True)
+class AdminOverview:
+    registered_accounts: int
+    feedback: FeedbackOverview
+    weekly_batch: WeeklyBatchOverview | None
