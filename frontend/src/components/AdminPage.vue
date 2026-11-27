@@ -11,6 +11,15 @@ const overview = ref<AdminOverview | null>(null)
 const accessDenied = ref(false)
 const error = ref('')
 const numberFormat = new Intl.NumberFormat('ko-KR')
+const batchTimeFormat = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul',
+  hourCycle: 'h23',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+})
 const batchStatuses = new Map([
   ['running', '진행 중'],
   ['retry_wait', '재시도 대기'],
@@ -85,8 +94,8 @@ onBeforeUnmount(() => controller.abort())
               </div>
             </dl>
           </section>
-          <section class="dashboard-card">
-            <h2>최근 주간 배치</h2>
+          <section class="dashboard-card" aria-labelledby="latest-weekly-batch">
+            <h2 id="latest-weekly-batch">최근 주간 배치</h2>
             <template v-if="overview.weekly_batch">
               <p class="batch-status">
                 <time :datetime="overview.weekly_batch.run_date">{{
@@ -114,6 +123,59 @@ onBeforeUnmount(() => controller.abort())
             <p v-else class="muted">주간 배치 실행 기록이 없습니다.</p>
           </section>
         </div>
+        <section
+          v-if="overview.weekly_batch_history?.length"
+          class="batch-history"
+          aria-labelledby="weekly-batch-history"
+        >
+          <div class="dashboard-heading">
+            <h2 id="weekly-batch-history">최근 7개 주간 배치 실행 기록</h2>
+            <span class="muted">한국 시간</span>
+          </div>
+          <ol class="batch-history-list" role="list">
+            <li
+              v-for="(entry, index) in overview.weekly_batch_history"
+              :key="index"
+              class="dashboard-card"
+            >
+              <div class="dashboard-heading">
+                <time :datetime="entry.batch.run_date">{{ entry.batch.run_date }}</time>
+                <strong>{{ batchStatuses.get(entry.batch.status) ?? entry.batch.status }}</strong>
+              </div>
+              <dl class="metrics">
+                <div>
+                  <dt>시작</dt>
+                  <dd>
+                    <time :datetime="entry.started_at">{{
+                      batchTimeFormat.format(new Date(entry.started_at))
+                    }}</time>
+                  </dd>
+                </div>
+                <div>
+                  <dt>종료</dt>
+                  <dd>
+                    <time v-if="entry.finished_at" :datetime="entry.finished_at">{{
+                      batchTimeFormat.format(new Date(entry.finished_at))
+                    }}</time>
+                    <span v-else>—</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>대기</dt>
+                  <dd>{{ numberFormat.format(entry.batch.pending) }}건</dd>
+                </div>
+                <div>
+                  <dt>완료</dt>
+                  <dd>{{ numberFormat.format(entry.batch.completed) }}건</dd>
+                </div>
+                <div>
+                  <dt>실패</dt>
+                  <dd>{{ numberFormat.format(entry.batch.failed) }}건</dd>
+                </div>
+              </dl>
+            </li>
+          </ol>
+        </section>
       </template>
       <template v-else-if="accessDenied">
         <h1>관리자 페이지 접근 제한</h1>
@@ -156,6 +218,24 @@ onBeforeUnmount(() => controller.abort())
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
   gap: 16px;
   margin-top: 24px;
+}
+
+.batch-history {
+  margin-top: 24px;
+}
+
+.batch-history h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.batch-history-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 256px), 1fr));
+  gap: 16px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
 .dashboard-card {

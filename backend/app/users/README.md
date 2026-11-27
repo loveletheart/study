@@ -13,7 +13,7 @@
 | `POST /api/v1/users/auth/logout` | 현재 브라우저 세션 폐기와 쿠키 삭제 |
 | `GET /api/v1/users/me` | 본인 계정과 저장된 추천 프로필 |
 | `GET /api/v1/admin/access` | 현재 세션의 관리자 권한 확인 |
-| `GET /api/v1/admin/overview` | 가입 계정 수, 피드백 상태별 건수, 최근 주간 배치 현황 조회 |
+| `GET /api/v1/admin/overview` | 가입 계정 수, 피드백 상태별 건수, 최근 주간 배치 현황과 실행 이력 조회 |
 | `PUT /api/v1/users/me/profile` | 닉네임·지역·추천 조건 저장 |
 | `GET /api/v1/users/{user_id}` | 로그인한 본인의 기본 정보만 조회 |
 

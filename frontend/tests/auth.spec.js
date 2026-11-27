@@ -98,6 +98,20 @@ test('관리자 운영 현황을 표시하고 새로고침 시 서버 권한을 
     completed: 9,
     failed: 1,
   }
+  let history = [
+    { batch: weeklyBatch, started_at: '2026-11-26T16:30:00Z', finished_at: null },
+    {
+      batch: {
+        run_date: '2026-11-26',
+        status: 'partial_failure',
+        pending: 0,
+        completed: 7,
+        failed: 2,
+      },
+      started_at: '2026-11-25T16:00:00Z',
+      finished_at: '2026-11-25T16:20:00Z',
+    },
+  ]
   await page.route('**/api/v1/admin/overview', (route) =>
     route.fulfill({
       status,
@@ -107,6 +121,7 @@ test('관리자 운영 현황을 표시하고 새로고침 시 서버 권한을 
               registered_accounts: 12,
               feedback: { reported: 3, draft: 1, approved: 4, rejected: 0 },
               weekly_batch: weeklyBatch,
+              weekly_batch_history: history,
             })
           : failure('AUTH_FORBIDDEN', '이 요청을 처리할 권한이 없습니다.'),
     }),
@@ -119,11 +134,27 @@ test('관리자 운영 현황을 표시하고 새로고침 시 서버 권한을 
   await expect(page.getByText('12개', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '추천 피드백' })).toBeVisible()
   await expect(page.getByText('3건', { exact: true })).toBeVisible()
-  await expect(page.getByText('진행 중', { exact: true })).toBeVisible()
-  await expect(page.getByText('9건', { exact: true })).toBeVisible()
+  const summary = page.getByRole('region', { name: '최근 주간 배치', exact: true })
+  await expect(summary.getByText('진행 중', { exact: true })).toBeVisible()
+  await expect(summary.getByText('9건', { exact: true })).toBeVisible()
+  const entries = page
+    .getByRole('region', { name: '최근 7개 주간 배치 실행 기록' })
+    .getByRole('listitem')
+  await expect(entries).toHaveCount(2)
+  await expect(entries.nth(0)).toContainText('진행 중')
+  await expect(entries.nth(0)).toContainText('01:30')
+  await expect(entries.nth(0)).toContainText('—')
+  await expect(entries.nth(1)).toContainText('일부 실패')
+  await expect(entries.nth(1)).toContainText('01:20')
+  await expect(entries.nth(1)).toContainText('2건')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
   weeklyBatch = null
+  history = []
   await page.getByRole('button', { name: '새로고침' }).click()
   await expect(page.getByText('주간 배치 실행 기록이 없습니다.')).toBeVisible()
+  await expect(entries).toHaveCount(0)
   status = 403
   await page.getByRole('button', { name: '새로고침' }).click()
   await expect(page.getByRole('heading', { name: '관리자 페이지 접근 제한' })).toBeVisible()
@@ -151,6 +182,23 @@ for (const signedIn of [true, false]) {
     await expect(page.getByRole('heading', { name: '관리자 페이지 접근 제한' })).toBeVisible()
   })
 }
+
+test('입력 이벤트 없이 채워진 로그인 정보를 화면 값 그대로 전송한다', async ({ page }) => {
+  await mockAccount(page, { profileReady: true })
+  await page.goto('./#login')
+  // 자동완성이 입력 이벤트 없이 값을 채운 뒤 화면이 갱신되는 상황을 재현합니다.
+  await page.getByRole('textbox', { name: '이메일', exact: true }).evaluate((field, value) => {
+    field.value = value
+  }, user.email)
+  await page.getByLabel('비밀번호', { exact: true }).evaluate((field, value) => {
+    field.value = value
+  }, password)
+  await page.getByRole('button', { name: '비밀번호 표시', exact: true }).click()
+  const request = page.waitForRequest('**/api/v1/users/auth/login')
+  await page.getByRole('button', { name: '로그인하기', exact: true }).click()
+  expect((await request).postDataJSON()).toEqual({ email: user.email, password })
+  await expect(page).not.toHaveURL(/#login$/)
+})
 
 async function openSignup(page) {
   await page.goto('./#signup')
