@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AuthPage from './components/AuthPage.vue'
+import AdminPage from './components/AdminPage.vue'
 import ProfilePage from './components/ProfilePage.vue'
 import { useAccount } from './composables/useAccount'
 import AppIcon from './components/AppIcon.vue'
@@ -69,7 +70,7 @@ watch(
   },
   { flush: 'sync' },
 )
-type View = 'home' | 'login' | 'register' | 'profile' | 'review'
+type View = 'home' | 'login' | 'register' | 'profile' | 'review' | 'admin'
 function hashView(): View {
   return (
     (
@@ -78,6 +79,7 @@ function hashView(): View {
         '#signup': 'register',
         '#profile': 'profile',
         '#review': 'review',
+        '#admin': 'admin',
       } as Record<string, View>
     )[window.location.hash] || 'home'
   )
@@ -93,6 +95,7 @@ function navigate(value: View) {
     register: 'signup',
     profile: 'profile',
     review: 'review',
+    admin: 'admin',
   }[value]
   window.scrollTo({ top: 0 })
 }
@@ -299,6 +302,15 @@ async function choosePreferences(value: Preferences) {
     @expired="expireSession"
   />
   <p v-else-if="view === 'review' && !accountReady" role="status">로그인 확인 중</p>
+  <AdminPage
+    v-else-if="view === 'admin' && accountReady"
+    :key="account?.user.id ?? 'guest'"
+    :signed-in="!!account"
+    @close="navigate('home')"
+    @login="navigate('login')"
+    @expired="expireSession"
+  />
+  <p v-else-if="view === 'admin'" role="status">관리자 권한 확인 중</p>
   <AuthPage
     v-else-if="view === 'login' || view === 'register'"
     :mode="view"
@@ -339,6 +351,13 @@ async function choosePreferences(value: Preferences) {
           >
             <AppIcon name="calendar" /><span>일주일 미리보기</span><span class="nav-dot" />
           </button>
+          <button
+            v-if="account?.is_admin === true"
+            aria-label="관리자 페이지"
+            @click="navigate('admin')"
+          >
+            <AppIcon name="sliders" /><span>관리자 페이지</span><span class="nav-dot" />
+          </button>
         </nav>
         <div class="sidebar-note">
           <span class="tiny-leaf"><AppIcon name="leaf" :size="25" /></span>
@@ -357,6 +376,15 @@ async function choosePreferences(value: Preferences) {
           <span class="topbar-caption">A GOOD DAY STARTS WITH A GOOD FIT.</span
           ><a class="mobile-brand" href="#main-content">온도<span>°</span></a>
           <div class="topbar-actions">
+            <button
+              v-if="account?.is_admin === true"
+              class="icon-button mobile-admin-button"
+              aria-label="관리자 페이지"
+              title="관리자 페이지"
+              @click="navigate('admin')"
+            >
+              <AppIcon name="sliders" :size="18" />
+            </button>
             <button v-if="account" class="account-button" @click="navigate('review')">
               내 수정안 검수
             </button>

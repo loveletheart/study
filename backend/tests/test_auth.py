@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 
@@ -69,6 +70,29 @@ class AuthenticationTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/users/me").status_code, 200)
         self.assertNotIn("password", response.text)
         self.assertNotIn("token", response.text)
+
+    def test_admin_access_requires_configured_account_and_valid_session(self):
+        unauthorized = self.client.get("/api/v1/admin/access")
+        self.assertEqual((unauthorized.status_code, unauthorized.json()["code"]), (401, "AUTH_REQUIRED"))
+        signup = self.signup("admin@example.com").json()["data"]
+        self.assertFalse(signup["is_admin"])
+        admin_id = UUID(signup["user"]["id"])
+        self.service = AuthService(
+            self.store, self.security, self.locations, clock=lambda: self.now,
+            admin_user_ids=frozenset({admin_id}),
+        )
+        self.assertTrue(self.client.get("/api/v1/users/me").json()["data"]["is_admin"])
+        authorized = self.client.get("/api/v1/admin/access")
+        self.assertEqual(authorized.status_code, 200)
+        self.assertTrue(authorized.json()["data"]["authorized"])
+        self.assertEqual(authorized.headers["cache-control"], "no-store")
+
+        self.client.post("/api/v1/users/auth/logout", headers=HEADERS)
+        self.assertFalse(self.signup().json()["data"]["is_admin"])
+        update = self.client.put("/api/v1/users/me/profile", json=self.profile(is_admin=True), headers=HEADERS)
+        self.assertEqual(update.status_code, 422)
+        forbidden = self.client.get("/api/v1/admin/access")
+        self.assertEqual((forbidden.status_code, forbidden.json()["code"]), (403, "AUTH_FORBIDDEN"))
 
     def test_password_and_session_tokens_are_not_stored_or_logged_in_plain_text(self):
         with self.assertLogs(level="INFO") as captured:

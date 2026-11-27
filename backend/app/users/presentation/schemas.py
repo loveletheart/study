@@ -71,11 +71,16 @@ class ProfileResponse(BaseModel):
 class AccountResponse(BaseModel):
     user: UserResponse
     profile: ProfileResponse
+    is_admin: bool
 
     @classmethod
     def from_account(cls, account: AccountDTO) -> "AccountResponse":
         from dataclasses import asdict
-        return cls(user=UserResponse.model_validate(account.user), profile=ProfileResponse(
-            location=LocationResponse.model_validate(account.location) if account.location else None,
-            preferences=PreferencesRequest.model_validate(asdict(account.preferences)),
-        ))
+        return cls(
+            user=UserResponse.model_validate(account.user),
+            profile=ProfileResponse(
+                location=LocationResponse.model_validate(account.location) if account.location else None,
+                preferences=PreferencesRequest.model_validate(asdict(account.preferences)),
+            ),
+            is_admin=account.is_admin,
+        )

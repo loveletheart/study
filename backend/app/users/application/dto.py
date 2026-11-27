@@ -39,3 +39,4 @@ class AccountDTO:
     user: UserDTO
     location: Location | None
     preferences: OutfitPreferences
+    is_admin: bool = False

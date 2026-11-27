@@ -8,7 +8,7 @@ const user = {
   email: 'user@example.com',
 }
 
-async function mockAccount(page, { signedIn = false, profileReady = false } = {}) {
+async function mockAccount(page, { signedIn = false, profileReady = false, isAdmin = false } = {}) {
   await mockApi(page)
   const state = {
     signedIn,
@@ -17,6 +17,7 @@ async function mockAccount(page, { signedIn = false, profileReady = false } = {}
     calls: [],
     current: {
       user,
+      is_admin: isAdmin,
       profile: {
         location: profileReady ? location : null,
         preferences: { ...preferences, avoid_items: [] },
@@ -69,6 +70,7 @@ async function mockAccount(page, { signedIn = false, profileReady = false } = {}
           json: failure('COMMON_INTERNAL_ERROR', '저장에 실패했어요. 다시 시도해 주세요.'),
         })
       state.current = {
+        ...state.current,
         user: { ...state.current.user, name: values.name },
         profile: {
           location:
@@ -84,6 +86,50 @@ async function mockAccount(page, { signedIn = false, profileReady = false } = {}
     return route.fulfill({ json: success(state.current) })
   })
   return state
+}
+
+test('관리자 메뉴에서 별도 화면을 열고 새로고침 시 서버 권한을 다시 확인한다', async ({ page }) => {
+  await mockAccount(page, { signedIn: true, profileReady: true, isAdmin: true })
+  let status = 200
+  await page.route('**/api/v1/admin/access', (route) =>
+    route.fulfill({
+      status,
+      json:
+        status === 200
+          ? success({ authorized: true })
+          : failure('AUTH_FORBIDDEN', '이 요청을 처리할 권한이 없습니다.'),
+    }),
+  )
+  await page.goto('./')
+  await page.getByRole('button', { name: '관리자 페이지', exact: true }).click()
+  await expect(page).toHaveURL(/#admin$/)
+  await expect(page.getByRole('heading', { name: '관리자 페이지', exact: true })).toBeVisible()
+  status = 403
+  await page.reload()
+  await expect(page.getByRole('heading', { name: '관리자 페이지 접근 제한' })).toBeVisible()
+  await expect(page.getByText('관리자 권한이 확인되었습니다.')).toHaveCount(0)
+})
+
+for (const signedIn of [true, false]) {
+  test(`${signedIn ? '일반 사용자' : '비로그인 사용자'}의 관리자 메뉴와 직접 접근을 제한한다`, async ({
+    page,
+  }) => {
+    await mockAccount(page, { signedIn, profileReady: true })
+    await page.route('**/api/v1/admin/access', (route) =>
+      route.fulfill({
+        status: signedIn ? 403 : 401,
+        json: signedIn
+          ? failure('AUTH_FORBIDDEN', '이 요청을 처리할 권한이 없습니다.')
+          : failure('AUTH_REQUIRED', '로그인이 필요합니다.'),
+      }),
+    )
+    const session = page.waitForResponse('**/api/v1/users/me')
+    await page.goto('./')
+    await session
+    await expect(page.getByRole('button', { name: '관리자 페이지', exact: true })).toHaveCount(0)
+    await page.goto('./#admin')
+    await expect(page.getByRole('heading', { name: '관리자 페이지 접근 제한' })).toBeVisible()
+  })
 }
 
 async function openSignup(page) {

@@ -170,6 +170,9 @@ svg {
   display: grid;
   gap: 8px;
 }
+.topbar .mobile-admin-button {
+  display: none;
+}
 .main-nav button {
   display: flex;
   align-items: center;
@@ -1588,6 +1591,9 @@ body:has(dialog[open]) {
 @media (max-width: 760px) {
   .sidebar {
     display: none;
+  }
+  .topbar .mobile-admin-button {
+    display: inline-flex;
   }
   .workspace {
     margin-left: 0;

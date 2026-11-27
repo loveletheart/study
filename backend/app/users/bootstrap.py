@@ -25,4 +25,5 @@ def get_auth_service() -> AuthService:
         SQLiteLocationCatalog(settings.database_path),
         max_age_seconds=settings.session_max_age_seconds,
         idle_seconds=settings.session_idle_seconds,
+        admin_user_ids=settings.admin_user_ids,
     )

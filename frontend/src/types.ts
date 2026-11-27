@@ -20,6 +20,7 @@ export interface Preferences {
 export interface Account {
   user: { id: string; name: string; email: string }
   profile: { location: Location | null; preferences: Preferences }
+  is_admin: boolean
 }
 export interface ProfileInput {
   name: string

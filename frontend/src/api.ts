@@ -110,6 +110,8 @@ export const getOutfit = (
 }
 
 export const getAccount = (signal: AbortSignal) => request<Account>('/users/me', signal, 20_000)
+export const checkAdminAccess = (signal: AbortSignal) =>
+  request<{ authorized: boolean }>('/admin/access', signal, 20_000)
 export const authenticate = (
   mode: 'login' | 'register',
   values: { email: string; password: string; name?: string },
