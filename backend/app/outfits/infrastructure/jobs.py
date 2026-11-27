@@ -58,3 +58,7 @@ class WeeklyOutfitBatch:
     def refresh_due(self, stopped=None) -> dict:
         """서버의 분 단위 확인에서 주간 배치를 시작하거나 재개"""
         return self._common.run_weekly_batch(stopped=stopped, on_ready=self._personalized.prepare_weekly)
+
+    def retry_failed(self) -> dict:
+        """현재 설정의 당일 배치에서 실패가 확정된 항목만 다시 처리한다."""
+        return self._common.run_weekly_batch(on_ready=self._personalized.prepare_weekly, force=True, retry_failed=True)

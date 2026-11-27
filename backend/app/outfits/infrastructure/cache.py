@@ -24,6 +24,8 @@ from pydantic import TypeAdapter, ValidationError
 
 # 프로젝트 모듈
 from app.common.database import connect_database
+from app.common.errors.codes import ErrorCode
+from app.common.errors.exceptions import AppError
 from app.outfits.application.dto import (
     TodayOutfitResult,
     WeeklyOutfitResult,
@@ -484,13 +486,15 @@ class CachedOutfitService:
         except Exception as exc:
             logger.warning("옷차림 사전 갱신 실패: kind=%s, cause=%s", key[1], type(exc).__name__)
 
-    def run_weekly_batch(self, stopped: Event | None = None, on_ready=None, force: bool = False) -> dict:
+    def run_weekly_batch(
+        self, stopped: Event | None = None, on_ready=None, force: bool = False, *, retry_failed: bool = False,
+    ) -> dict:
         """예약 시간이 지난 뒤 당일 배치의 미완료 대상을 처리한다."""
         now = self._clock().astimezone(KST)
         if not force and now.hour < self._weekly_batch_hour:
             return {"status": "not_due", "generated": 0, "failed": 0}
 
-        status, run, targets = self._weekly_batch.claim(now)
+        status, run, targets = self._weekly_batch.claim(now, retry_failed=retry_failed)
         if run is None:
             return {"status": status, "generated": 0, "failed": 0}
 
@@ -526,8 +530,8 @@ class CachedOutfitService:
                         raise
                     except Exception as exc:
                         failed += 1
-                        self._weekly_batch.record(run, target, failed=True, retryable=isinstance(exc, WEEKLY_RETRYABLE_ERRORS))
-                        logger.warning("주간 배치 항목 실패: kind=%s, cause=%s", target.key[1], type(exc).__name__)
+                        error_code = exc.error_code if isinstance(exc, AppError) else ErrorCode.COMMON_INTERNAL_ERROR
+                        self._record_weekly_failure(run, target, error_code, isinstance(exc, WEEKLY_RETRYABLE_ERRORS))
                         continue
 
                     if personal:
@@ -536,10 +540,13 @@ class CachedOutfitService:
                     if stopped is not None and stopped.is_set():
                         interrupted = True
                         break
-                    self._weekly_batch.record(
-                        run, target, failed=bool(personal and personal["failed"]),
-                        retryable=bool(personal and personal.get("retryable_failed", personal["failed"])),
-                    )
+                    if personal and personal["failed"]:
+                        self._record_weekly_failure(
+                            run, target, personal.get("last_error_code") or ErrorCode.COMMON_INTERNAL_ERROR,
+                            bool(personal.get("retryable_failed", personal["failed"])),
+                        )
+                    else:
+                        self._weekly_batch.record(run, target, failed=False)
             status = self._weekly_batch.finish(run, stopped=interrupted)
         except WeeklyBatchLeaseLostError:
             status = "lease_lost"
@@ -554,6 +561,16 @@ class CachedOutfitService:
             "failed": failed, "elapsed_seconds": elapsed,
         }
 
+    def _record_weekly_failure(
+        self, run: WeeklyBatchRun, target: WeeklyBatchTarget, error_code: ErrorCode, retryable: bool,
+    ) -> None:
+        retry_at = self._weekly_batch.record(run, target, failed=True, retryable=retryable, error_code=error_code.value)
+        logger.warning(
+            "주간 배치 항목 실패: run_date=%s, kind=%s, error_code=%s, attempts=%s, next_retry_at=%s",
+            run.date, target.key[1], error_code.value, target.failures + 1,
+            datetime.fromtimestamp(retry_at, KST).isoformat() if retry_at else None,
+        )
+
     def _prepare_weekly_common(
         self, run: WeeklyBatchRun, target: WeeklyBatchTarget,
     ) -> tuple[WeeklyOutfitResult, bool]:
@@ -562,7 +579,6 @@ class CachedOutfitService:
             existing = self._read(key)
             if isinstance(existing, WeeklyOutfitResult) and existing.forecast.today.isoformat() == run.date:
                 return existing, False
-            raise OutfitForecastError()
 
         with closing(connect_database(self._database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -762,6 +778,7 @@ class SQLitePersonalizedOutfitCache:
                 (self._scope, self._previous_scope, region_id, self._clock().timestamp() - 86400),
             ).fetchall()
         generated, failed, retryable_failed = 0, 0, 0
+        last_error_code = None
         for target in targets:
             if stopped is not None and stopped.is_set():
                 break
@@ -776,5 +793,8 @@ class SQLitePersonalizedOutfitCache:
             except Exception as exc:
                 failed += 1
                 retryable_failed += int(isinstance(exc, WEEKLY_RETRYABLE_ERRORS))
-                logger.warning("주간 개인 맞춤 배치 실패: cause=%s", type(exc).__name__)
-        return {"generated": generated, "failed": failed, "retryable_failed": retryable_failed}
+                last_error_code = exc.error_code if isinstance(exc, AppError) else ErrorCode.COMMON_INTERNAL_ERROR
+                logger.warning("주간 개인 맞춤 배치 실패: region=%s, error_code=%s", region_id, last_error_code.value)
+        return {
+            "generated": generated, "failed": failed, "retryable_failed": retryable_failed, "last_error_code": last_error_code,
+        }

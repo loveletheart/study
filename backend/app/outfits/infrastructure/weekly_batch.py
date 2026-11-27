@@ -65,12 +65,16 @@ class WeeklyBatchStore:
                 "(scope TEXT NOT NULL, run_date TEXT NOT NULL, kind TEXT NOT NULL, "
                 "latitude REAL NOT NULL, longitude REAL NOT NULL, requested_at REAL NOT NULL, "
                 "common_ready INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0, "
-                "status TEXT NOT NULL DEFAULT 'pending', retry_at REAL NOT NULL DEFAULT 0, "
+                "status TEXT NOT NULL DEFAULT 'pending', retry_at REAL NOT NULL DEFAULT 0, last_error_code TEXT, "
                 "PRIMARY KEY(scope, run_date, kind, latitude, longitude), "
                 "FOREIGN KEY(scope, run_date) REFERENCES outfit_weekly_batch_runs(scope, run_date) ON DELETE CASCADE)",
             )
 
-    def claim(self, now: datetime) -> tuple[str, WeeklyBatchRun | None, list[WeeklyBatchTarget]]:
+            target_columns = {row["name"] for row in connection.execute("PRAGMA table_info(outfit_weekly_batch_targets)")}
+            if "last_error_code" not in target_columns:
+                connection.execute("ALTER TABLE outfit_weekly_batch_targets ADD COLUMN last_error_code TEXT")
+
+    def claim(self, now: datetime, *, retry_failed: bool = False) -> tuple[str, WeeklyBatchRun | None, list[WeeklyBatchTarget]]:
         run_date, timestamp = now.date().isoformat(), now.timestamp()
         with closing(connect_database(self._database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -81,10 +85,21 @@ class WeeklyBatchStore:
             ).fetchone()
             if previous is not None and (
                 previous["status"] == "completed"
-                or (previous["status"] == "partial_failure" and previous["lease_token"] is not None)
+                or (not retry_failed and previous["status"] == "partial_failure" and previous["lease_token"] is not None)
                 or (previous["status"] == "running" and previous["lease_expires_at"] > timestamp)
             ):
                 return "already_run", None, []
+
+            if retry_failed:
+                if previous is None or previous["status"] != "partial_failure" or previous["lease_token"] is None:
+                    return "no_failed_targets", None, []
+                reopened = connection.execute(
+                    "UPDATE outfit_weekly_batch_targets SET status='pending', retry_at=0 "
+                    "WHERE scope=? AND run_date=? AND status='failed'",
+                    (self._scope, run_date),
+                ).rowcount
+                if not reopened:
+                    return "no_failed_targets", None, []
 
             run = WeeklyBatchRun(run_date, uuid4().hex)
             if previous is None or previous["lease_token"] is None:
@@ -194,7 +209,10 @@ class WeeklyBatchStore:
             (self._scope, run.date, *key[1:]),
         )
 
-    def record(self, run: WeeklyBatchRun, target: WeeklyBatchTarget, *, failed: bool, retryable: bool = False) -> None:
+    def record(
+        self, run: WeeklyBatchRun, target: WeeklyBatchTarget, *,
+        failed: bool, retryable: bool = False, error_code: str | None = None,
+    ) -> float:
         failures = target.failures + int(failed)
         status, retry_at = "completed", 0.0
         if failed:
@@ -206,10 +224,12 @@ class WeeklyBatchStore:
             connection.execute("BEGIN IMMEDIATE")
             self.check_lease(connection, run)
             connection.execute(
-                "UPDATE outfit_weekly_batch_targets SET status=?, failures=?, retry_at=? "
+                "UPDATE outfit_weekly_batch_targets SET status=?, failures=?, retry_at=?, "
+                "last_error_code=COALESCE(?, last_error_code) "
                 "WHERE scope=? AND run_date=? AND kind=? AND latitude=? AND longitude=?",
-                (status, failures, retry_at, self._scope, run.date, *target.key[1:]),
+                (status, failures, retry_at, error_code, self._scope, run.date, *target.key[1:]),
             )
+        return retry_at
 
     def finish(self, run: WeeklyBatchRun, *, stopped: bool) -> str:
         with closing(connect_database(self._database_path)) as connection, connection:

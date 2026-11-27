@@ -19,6 +19,7 @@ from app.outfits.application.exceptions import OutfitLlmTimeoutError, WeeklyOutf
 from app.outfits.application.services import RegionOutfitService
 from app.outfits.domain.models import ClothingPreference, OutfitPreferences, OutfitStyle
 from app.outfits.infrastructure.clients import OllamaClient
+from app.outfits.infrastructure.jobs import WeeklyOutfitBatch
 from app.outfits.infrastructure.cache import SQLitePersonalizedOutfitCache, CachedOutfitService
 from app.outfits.presentation.schemas import WeeklyOutfitResponse
 from app.weather.domain.models import KST, Location, SigunguRegion
@@ -237,6 +238,76 @@ class WeeklyBatchTests(unittest.TestCase):
         self.assertEqual(self.cache.run_weekly_batch()["status"], "already_run")
         self.assertEqual(self.cache.get_weekly(37, 127), first)
         self.assertEqual(self.fixture.llm.chat.call_count, 4)
+
+    def test_manual_recovery_retries_only_failed_targets_and_preserves_diagnostics(self):
+        for latitude in (37, 38):
+            with self.assertRaises(WeeklyOutfitNotReadyError):
+                self.cache.get_weekly(latitude, 127)
+        self.at(1)
+
+        def unavailable_for_first_region(latitude, longitude):
+            if latitude == 37:
+                raise OutfitLlmTimeoutError()
+            return self.fixture.service.get_weekly(latitude, longitude)
+
+        self.service.get_weekly.side_effect = unavailable_for_first_region
+        personalized = Mock()
+        personalized.prepare_weekly.return_value = None
+        recovery = WeeklyOutfitBatch(self.make_cache(), personalized)
+        first_retry = (self.fixture.now + timedelta(minutes=5)).isoformat()
+
+        with self.assertLogs("app.outfits.infrastructure.cache", level="WARNING") as logs:
+            self.assertEqual(self.cache.run_weekly_batch()["status"], "retry_wait")
+            self.assertEqual(recovery.retry_failed()["status"], "no_failed_targets")
+            self.at(1, 5)
+            self.assertEqual(self.make_cache().run_weekly_batch()["status"], "retry_wait")
+            self.at(1, 20)
+            self.assertEqual(self.make_cache().run_weekly_batch()["status"], "partial_failure")
+        self.assertIn("error_code=OUTFIT_LLM_TIMEOUT", logs.output[0])
+        self.assertIn(f"next_retry_at={first_retry}", logs.output[0])
+        self.assertIn("next_retry_at=None", logs.output[-1])
+
+        self.assertEqual(self.cache.run_weekly_batch()["status"], "already_run")
+        self.service.get_weekly.side_effect = None
+        result = recovery.retry_failed()
+        self.assertEqual((result["status"], result["generated"]), ("completed", 1))
+        self.assertEqual(recovery.retry_failed()["status"], "already_run")
+        self.assertEqual(len(self.cache.get_weekly(37, 127).daily), 7)
+        self.assertEqual([entry.args[0] for entry in self.service.get_weekly.call_args_list].count(38), 1)
+        with closing(connect_database(self.database_path)) as connection:
+            row = connection.execute(
+                "SELECT status, failures, last_error_code FROM outfit_weekly_batch_targets WHERE latitude=37"
+            ).fetchone()
+        self.assertEqual(tuple(row), ("completed", 3, "OUTFIT_LLM_TIMEOUT"))
+
+    def test_manual_recovery_rebuilds_common_result_if_it_was_evicted(self):
+        with self.assertRaises(WeeklyOutfitNotReadyError):
+            self.cache.get_weekly(37, 127)
+        self.at(1)
+        personalized = Mock()
+        personalized.prepare_weekly.return_value = {"generated": 0, "failed": 1, "retryable_failed": 0}
+        with self.assertLogs("app.outfits.infrastructure.cache", level="WARNING"):
+            self.assertEqual(self.cache.run_weekly_batch(on_ready=personalized.prepare_weekly)["status"], "partial_failure")
+        with closing(connect_database(self.database_path)) as connection, connection:
+            connection.execute("DELETE FROM outfit_result_cache WHERE kind='weekly'")
+
+        personalized.prepare_weekly.return_value = {"generated": 1, "failed": 0}
+        result = WeeklyOutfitBatch(self.make_cache(), personalized).retry_failed()
+        self.assertEqual((result["status"], result["generated"], result["personalized_generated"]), ("completed", 1, 1))
+        self.assertEqual(len(self.cache.get_weekly(37, 127).daily), 7)
+
+    def test_existing_batch_targets_gain_diagnostics_without_losing_rows(self):
+        with self.assertRaises(WeeklyOutfitNotReadyError):
+            self.cache.get_weekly(37, 127)
+        self.at(1)
+        self.assertEqual(self.cache.run_weekly_batch()["status"], "completed")
+        with closing(connect_database(self.database_path)) as connection, connection:
+            connection.execute("ALTER TABLE outfit_weekly_batch_targets DROP COLUMN last_error_code")
+
+        self.assertEqual(self.make_cache().run_weekly_batch()["status"], "already_run")
+        with closing(connect_database(self.database_path)) as connection:
+            row = connection.execute("SELECT status, last_error_code FROM outfit_weekly_batch_targets").fetchone()
+        self.assertEqual(tuple(row), ("completed", None))
 
     def test_missed_schedule_is_caught_up_after_a_late_start(self):
         with self.assertRaises(WeeklyOutfitNotReadyError):
