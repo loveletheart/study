@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError, errorMessage, getAdminOverview } from '../api'
-import type { AdminOverview } from '../types'
+import type { AdminOverview, Period } from '../types'
 
-const props = defineProps<{ signedIn: boolean }>()
-const emit = defineEmits<{ close: []; login: []; expired: [] }>()
+const props = defineProps<{ accountReady: boolean; signedIn: boolean }>()
+const emit = defineEmits<{ close: []; recommend: [period: Period]; login: []; expired: [] }>()
 const controller = new AbortController()
 const loading = ref(true)
 const overview = ref<AdminOverview | null>(null)
@@ -47,7 +47,13 @@ async function loadOverview() {
   }
 }
 
-onMounted(loadOverview)
+watch(
+  () => props.accountReady,
+  (ready) => {
+    if (ready) void loadOverview()
+  },
+  { immediate: true },
+)
 onBeforeUnmount(() => controller.abort())
 </script>
 
@@ -57,12 +63,19 @@ onBeforeUnmount(() => controller.abort())
       <a class="account-brand" href="#main-content" @click.prevent="emit('close')"
         >온도<span>°</span></a
       >
-      <button type="button" class="secondary-button" @click="emit('close')">
-        추천으로 돌아가기
-      </button>
+      <nav class="recommendation-nav" aria-label="추천 카테고리">
+        <button type="button" class="secondary-button" @click="emit('recommend', 'today')">
+          오늘의 옷차림
+        </button>
+        <button type="button" class="secondary-button" @click="emit('recommend', 'weekly')">
+          일주일 미리보기
+        </button>
+      </nav>
     </header>
     <section class="admin-dashboard panel">
-      <p v-if="loading" role="status">운영 현황을 불러오는 중입니다.</p>
+      <p v-if="!accountReady || loading" role="status">
+        {{ accountReady ? '운영 현황을 불러오는 중입니다.' : '관리자 권한 확인 중' }}
+      </p>
       <template v-else-if="overview">
         <div class="dashboard-heading">
           <h1>관리자 페이지</h1>
@@ -194,6 +207,13 @@ onBeforeUnmount(() => controller.abort())
 </template>
 
 <style scoped>
+.recommendation-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .admin-dashboard {
   padding: clamp(16px, 4vw, 36px);
 }

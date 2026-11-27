@@ -161,6 +161,42 @@ test('관리자 운영 현황을 표시하고 새로고침 시 서버 권한을 
   await expect(page.getByRole('heading', { name: '가입 계정' })).toHaveCount(0)
 })
 
+test('관리자 화면에서 오늘과 주간 추천으로 바로 이동한다', async ({ page }) => {
+  await mockAccount(page, { signedIn: true, profileReady: true, isAdmin: true })
+  await page.route('**/api/v1/admin/overview', (route) =>
+    route.fulfill({
+      json: success({
+        registered_accounts: 1,
+        feedback: { reported: 0, draft: 0, approved: 0, rejected: 0 },
+        weekly_batch: null,
+        weekly_batch_history: [],
+      }),
+    }),
+  )
+  await page.goto('./')
+  const admin = page.getByRole('button', { name: '관리자 페이지', exact: true })
+  const categories = page.getByRole('navigation', { name: '추천 카테고리' })
+
+  await admin.click()
+  await expect(page.getByRole('heading', { name: '관리자 페이지', exact: true })).toBeVisible()
+  await categories.getByRole('button', { name: '일주일 미리보기', exact: true }).click()
+  await expect(page).toHaveURL(/#main-content$/)
+  await expect(page.getByRole('heading', { name: /일주일을 가볍게 준비해요/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: '일주일', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+
+  await admin.click()
+  await categories.getByRole('button', { name: '오늘의 옷차림', exact: true }).click()
+  await expect(page).toHaveURL(/#main-content$/)
+  await expect(page.getByRole('heading', { name: /오늘, 뭐 입지/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: '오늘', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+})
+
 for (const signedIn of [true, false]) {
   test(`${signedIn ? '일반 사용자' : '비로그인 사용자'}의 관리자 메뉴와 직접 접근을 제한한다`, async ({
     page,
@@ -180,6 +216,11 @@ for (const signedIn of [true, false]) {
     await expect(page.getByRole('button', { name: '관리자 페이지', exact: true })).toHaveCount(0)
     await page.goto('./#admin')
     await expect(page.getByRole('heading', { name: '관리자 페이지 접근 제한' })).toBeVisible()
+    await page
+      .getByRole('navigation', { name: '추천 카테고리' })
+      .getByRole('button', { name: '일주일 미리보기', exact: true })
+      .click()
+    await expect(page.getByRole('heading', { name: /일주일을 가볍게 준비해요/ })).toBeVisible()
   })
 }
 
