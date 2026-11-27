@@ -13,6 +13,7 @@
 | `POST /api/v1/users/auth/logout` | 현재 브라우저 세션 폐기와 쿠키 삭제 |
 | `GET /api/v1/users/me` | 본인 계정과 저장된 추천 프로필 |
 | `GET /api/v1/admin/access` | 현재 세션의 관리자 권한 확인 |
+| `GET /api/v1/admin/overview` | 가입 계정 수, 피드백 상태별 건수, 최근 주간 배치 현황 조회 |
 | `PUT /api/v1/users/me/profile` | 닉네임·지역·추천 조건 저장 |
 | `GET /api/v1/users/{user_id}` | 로그인한 본인의 기본 정보만 조회 |
 
@@ -80,4 +81,6 @@ HTTPS 요청에는 `Secure`가 자동으로 적용됩니다. 앱에 HTTP로 전�
 
 관리자로 사용할 계정을 가입시킨 뒤, 해당 계정으로 로그인해 `GET /api/v1/users/me` 응답의 `data.user.id` 값을 확인합니다. 루트의 `.env`에서 `STUDY_ADMIN_USER_IDS`에 사용자 UUID를 쉼표로 구분해 지정하고 서버를 다시 시작합니다. 지정된 계정으로 로그인하면 메뉴에 **관리자 페이지**가 표시됩니다.
 
-관리자 화면 주소는 `/app/#admin`입니다. 화면을 열 때 호출하는 `GET /api/v1/admin/access`에서 기존 세션과 서버에 설정된 관리자 UUID를 확인합니다. 설정이 비어 있으면 관리자 계정은 없습니다.
+관리자 화면 주소는 `/app/#admin`입니다. 화면을 열 때 호출하는 `GET /api/v1/admin/overview`에서 기존 세션과 서버에 설정된 관리자 UUID를 확인합니다. 설정이 비어 있으면 관리자 계정은 없습니다.
+
+가입 계정 수는 로그인 자격 증명이 있는 계정의 수입니다. 피드백은 상태별 합계를, 주간 배치는 가장 최근 실행의 상태와 대상 집계를 표시합니다.

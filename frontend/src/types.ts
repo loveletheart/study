@@ -200,3 +200,19 @@ export function validateFeedbackEdit(edit: FeedbackEdit): string {
     return '이유와 주의 사항은 항목마다 1~500자로 작성해 주세요.'
   return ''
 }
+export interface AdminOverview {
+  registered_accounts: number
+  feedback: {
+    reported: number
+    draft: number
+    approved: number
+    rejected: number
+  }
+  weekly_batch: {
+    run_date: string
+    status: string
+    pending: number
+    completed: number
+    failed: number
+  } | null
+}

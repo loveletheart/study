@@ -1,10 +1,15 @@
-"""관리자 페이지에서 사용하는 권한 확인 API."""
+"""관리자 페이지에서 사용하는 운영 API."""
+
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
 
+from app.common.config import Settings, get_settings
 from app.common.errors.codes import ErrorCode
 from app.common.errors.openapi import error_responses
 from app.common.responses import ApiResponse
+from app.users.application.dto import AdminOverview
+from app.users.infrastructure.admin_overview import read_admin_overview
 from app.users.presentation.router import AuthDependency, SessionCookie, private_response
 
 
@@ -24,3 +29,9 @@ router = APIRouter(
 def check_access(response: Response) -> ApiResponse[dict[str, bool]]:
     private_response(response)
     return ApiResponse(data={"authorized": True})
+
+
+@router.get("/overview", summary="가입 계정·추천 피드백·최근 주간 배치 현황")
+def overview(response: Response, settings: Annotated[Settings, Depends(get_settings)]) -> ApiResponse[AdminOverview]:
+    private_response(response)
+    return ApiResponse(data=read_admin_overview(settings.database_path))

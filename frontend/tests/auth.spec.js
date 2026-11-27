@@ -88,15 +88,26 @@ async function mockAccount(page, { signedIn = false, profileReady = false, isAdm
   return state
 }
 
-test('관리자 메뉴에서 별도 화면을 열고 새로고침 시 서버 권한을 다시 확인한다', async ({ page }) => {
+test('관리자 운영 현황을 표시하고 새로고침 시 서버 권한을 다시 확인한다', async ({ page }) => {
   await mockAccount(page, { signedIn: true, profileReady: true, isAdmin: true })
   let status = 200
-  await page.route('**/api/v1/admin/access', (route) =>
+  let weeklyBatch = {
+    run_date: '2026-11-27',
+    status: 'running',
+    pending: 2,
+    completed: 9,
+    failed: 1,
+  }
+  await page.route('**/api/v1/admin/overview', (route) =>
     route.fulfill({
       status,
       json:
         status === 200
-          ? success({ authorized: true })
+          ? success({
+              registered_accounts: 12,
+              feedback: { reported: 3, draft: 1, approved: 4, rejected: 0 },
+              weekly_batch: weeklyBatch,
+            })
           : failure('AUTH_FORBIDDEN', '이 요청을 처리할 권한이 없습니다.'),
     }),
   )
@@ -104,10 +115,19 @@ test('관리자 메뉴에서 별도 화면을 열고 새로고침 시 서버 권
   await page.getByRole('button', { name: '관리자 페이지', exact: true }).click()
   await expect(page).toHaveURL(/#admin$/)
   await expect(page.getByRole('heading', { name: '관리자 페이지', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '가입 계정' })).toBeVisible()
+  await expect(page.getByText('12개', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '추천 피드백' })).toBeVisible()
+  await expect(page.getByText('3건', { exact: true })).toBeVisible()
+  await expect(page.getByText('진행 중', { exact: true })).toBeVisible()
+  await expect(page.getByText('9건', { exact: true })).toBeVisible()
+  weeklyBatch = null
+  await page.getByRole('button', { name: '새로고침' }).click()
+  await expect(page.getByText('주간 배치 실행 기록이 없습니다.')).toBeVisible()
   status = 403
-  await page.reload()
+  await page.getByRole('button', { name: '새로고침' }).click()
   await expect(page.getByRole('heading', { name: '관리자 페이지 접근 제한' })).toBeVisible()
-  await expect(page.getByText('관리자 권한이 확인되었습니다.')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '가입 계정' })).toHaveCount(0)
 })
 
 for (const signedIn of [true, false]) {
@@ -115,7 +135,7 @@ for (const signedIn of [true, false]) {
     page,
   }) => {
     await mockAccount(page, { signedIn, profileReady: true })
-    await page.route('**/api/v1/admin/access', (route) =>
+    await page.route('**/api/v1/admin/overview', (route) =>
       route.fulfill({
         status: signedIn ? 403 : 401,
         json: signedIn
