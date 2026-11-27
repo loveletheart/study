@@ -24,6 +24,8 @@ from pydantic import TypeAdapter, ValidationError
 
 # 프로젝트 모듈
 from app.common.database import connect_database
+from app.common.errors.codes import ErrorCode
+from app.common.errors.exceptions import AppError
 from app.outfits.application.dto import (
     TodayOutfitResult,
     WeeklyOutfitResult,
@@ -484,13 +486,18 @@ class CachedOutfitService:
         except Exception as exc:
             logger.warning("옷차림 사전 갱신 실패: kind=%s, cause=%s", key[1], type(exc).__name__)
 
-    def run_weekly_batch(self, stopped: Event | None = None, on_ready=None, force: bool = False) -> dict:
+    def run_weekly_batch(
+        self, stopped: Event | None = None, on_ready=None, force: bool = False, *, retry_failed: bool = False,
+        snapshot_personal: Callable[[Connection, CacheKey, float], str] | None = None,
+    ) -> dict:
         """예약 시간이 지난 뒤 당일 배치의 미완료 대상을 처리한다."""
         now = self._clock().astimezone(KST)
         if not force and now.hour < self._weekly_batch_hour:
             return {"status": "not_due", "generated": 0, "failed": 0}
 
-        status, run, targets = self._weekly_batch.claim(now)
+        status, run, targets = self._weekly_batch.claim(
+            now, retry_failed=retry_failed, snapshot_personal=snapshot_personal,
+        )
         if run is None:
             return {"status": status, "generated": 0, "failed": 0}
 
@@ -526,8 +533,8 @@ class CachedOutfitService:
                         raise
                     except Exception as exc:
                         failed += 1
-                        self._weekly_batch.record(run, target, failed=True, retryable=isinstance(exc, WEEKLY_RETRYABLE_ERRORS))
-                        logger.warning("주간 배치 항목 실패: kind=%s, cause=%s", target.key[1], type(exc).__name__)
+                        error_code = exc.error_code if isinstance(exc, AppError) else ErrorCode.COMMON_INTERNAL_ERROR
+                        self._record_weekly_failure(run, target, error_code, isinstance(exc, WEEKLY_RETRYABLE_ERRORS))
                         continue
 
                     if personal:
@@ -536,10 +543,13 @@ class CachedOutfitService:
                     if stopped is not None and stopped.is_set():
                         interrupted = True
                         break
-                    self._weekly_batch.record(
-                        run, target, failed=bool(personal and personal["failed"]),
-                        retryable=bool(personal and personal.get("retryable_failed", personal["failed"])),
-                    )
+                    if personal and personal["failed"]:
+                        self._record_weekly_failure(
+                            run, target, personal.get("last_error_code") or ErrorCode.COMMON_INTERNAL_ERROR,
+                            bool(personal.get("retryable_failed", personal["failed"])),
+                        )
+                    else:
+                        self._weekly_batch.record(run, target, failed=False)
             status = self._weekly_batch.finish(run, stopped=interrupted)
         except WeeklyBatchLeaseLostError:
             status = "lease_lost"
@@ -554,6 +564,16 @@ class CachedOutfitService:
             "failed": failed, "elapsed_seconds": elapsed,
         }
 
+    def _record_weekly_failure(
+        self, run: WeeklyBatchRun, target: WeeklyBatchTarget, error_code: ErrorCode, retryable: bool,
+    ) -> None:
+        retry_at = self._weekly_batch.record(run, target, failed=True, retryable=retryable, error_code=error_code.value)
+        logger.warning(
+            "주간 배치 항목 실패: run_date=%s, kind=%s, error_code=%s, attempts=%s, next_retry_at=%s",
+            run.date, target.key[1], error_code.value, target.failures + 1,
+            datetime.fromtimestamp(retry_at, KST).isoformat() if retry_at else None,
+        )
+
     def _prepare_weekly_common(
         self, run: WeeklyBatchRun, target: WeeklyBatchTarget,
     ) -> tuple[WeeklyOutfitResult, bool]:
@@ -562,7 +582,6 @@ class CachedOutfitService:
             existing = self._read(key)
             if isinstance(existing, WeeklyOutfitResult) and existing.forecast.today.isoformat() == run.date:
                 return existing, False
-            raise OutfitForecastError()
 
         with closing(connect_database(self._database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -745,29 +764,72 @@ class SQLitePersonalizedOutfitCache:
             except Exception as exc:
                 logger.warning("개인 맞춤 사전 생성 실패: kind=%s, cause=%s", target["kind"], type(exc).__name__)
 
+    @staticmethod
+    def _weekly_region_id(key: CacheKey) -> int | None:
+        parts = key[1].split(":")
+        return int(parts[1]) if len(parts) == 3 and parts[0] == "region" else None
+
+    def snapshot_weekly_preferences(self, connection: Connection, key: CacheKey, started_at: float) -> str:
+        """배치 시작 시각의 개인 조건을 보관한다."""
+        region_id = self._weekly_region_id(key)
+        if region_id is None:
+            return "[]"
+        rows = connection.execute(
+            "SELECT preferences FROM outfit_personal_targets "
+            "WHERE scope IN (?, ?) AND location_id=? AND kind='weekly' AND requested_at BETWEEN ? AND ? "
+            "GROUP BY preferences ORDER BY MAX(requested_at) DESC, preferences",
+            (self._scope, self._previous_scope, region_id, started_at - 86400, started_at),
+        )
+        return json.dumps([
+            value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+            for (value,) in rows
+        ])
+
+    def _saved_weekly_preferences(
+        self, key: CacheKey, run_date: str, check_lease: Callable[[Connection], None] | None,
+    ) -> list[str]:
+        with closing(connect_database(self._database_path)) as connection, connection:
+            if check_lease is not None:
+                connection.execute("BEGIN IMMEDIATE")
+                check_lease(connection)
+            lookup = (key[0], run_date, *key[1:])
+            row = connection.execute(
+                "SELECT run.started_at, target.personal_preferences FROM outfit_weekly_batch_targets AS target "
+                "JOIN outfit_weekly_batch_runs AS run USING (scope, run_date) "
+                "WHERE target.scope=? AND target.run_date=? AND target.kind=? "
+                "AND target.latitude=? AND target.longitude=?",
+                lookup,
+            ).fetchone()
+            if row is not None and row["personal_preferences"] is not None:
+                return json.loads(row["personal_preferences"])
+
+            started_at = row["started_at"] if row is not None else self._clock().timestamp()
+            snapshot = self.snapshot_weekly_preferences(connection, key, started_at)
+            if row is not None and check_lease is not None:
+                connection.execute(
+                    "UPDATE outfit_weekly_batch_targets SET personal_preferences=? "
+                    "WHERE scope=? AND run_date=? AND kind=? AND latitude=? AND longitude=?",
+                    (snapshot, *lookup),
+                )
+            return json.loads(snapshot)
+
     def prepare_weekly(
         self, key: CacheKey, base: WeeklyOutfitResult, stopped=None,
         *, check_lease: Callable[[Connection], None] | None = None,
     ) -> dict:
-        """주간 기본 결과가 준비된 지역부터 등록된 개인 조건을 같은 야간 작업에서 생성"""
-        parts = key[1].split(":")
-        if len(parts) != 3 or parts[0] != "region":
+        """주간 기본 결과가 준비된 지역의 원래 개인 조건을 생성한다."""
+        region_id = self._weekly_region_id(key)
+        if region_id is None:
             return {"generated": 0, "failed": 0}
-        region_id = int(parts[1])
-        with closing(connect_database(self._database_path)) as connection:
-            targets = connection.execute(
-                "SELECT preferences FROM outfit_personal_targets "
-                "WHERE scope IN (?, ?) AND location_id=? AND kind='weekly' AND requested_at>=? "
-                "GROUP BY preferences ORDER BY MAX(requested_at) DESC",
-                (self._scope, self._previous_scope, region_id, self._clock().timestamp() - 86400),
-            ).fetchall()
+        targets = self._saved_weekly_preferences(key, base.forecast.today.isoformat(), check_lease)
         generated, failed, retryable_failed = 0, 0, 0
+        last_error_code = None
         for target in targets:
             if stopped is not None and stopped.is_set():
                 break
             try:
                 _, cached = self.get(
-                    region_id, "weekly", base, PREFERENCES_ADAPTER.validate_json(target["preferences"]),
+                    region_id, "weekly", base, PREFERENCES_ADAPTER.validate_json(target),
                     register=False, from_weekly_batch=True, check_lease=check_lease,
                 )
                 generated += int(not cached)
@@ -776,5 +838,8 @@ class SQLitePersonalizedOutfitCache:
             except Exception as exc:
                 failed += 1
                 retryable_failed += int(isinstance(exc, WEEKLY_RETRYABLE_ERRORS))
-                logger.warning("주간 개인 맞춤 배치 실패: cause=%s", type(exc).__name__)
-        return {"generated": generated, "failed": failed, "retryable_failed": retryable_failed}
+                last_error_code = exc.error_code if isinstance(exc, AppError) else ErrorCode.COMMON_INTERNAL_ERROR
+                logger.warning("주간 개인 맞춤 배치 실패: region=%s, error_code=%s", region_id, last_error_code.value)
+        return {
+            "generated": generated, "failed": failed, "retryable_failed": retryable_failed, "last_error_code": last_error_code,
+        }
