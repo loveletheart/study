@@ -208,11 +208,18 @@ export interface AdminOverview {
     approved: number
     rejected: number
   }
-  weekly_batch: {
-    run_date: string
-    status: string
-    pending: number
-    completed: number
-    failed: number
-  } | null
+  weekly_batch: WeeklyBatchOverview | null
+  weekly_batch_history?: {
+    batch: WeeklyBatchOverview
+    started_at: string
+    finished_at: string | null
+  }[]
+}
+
+interface WeeklyBatchOverview {
+  run_date: string
+  status: string
+  pending: number
+  completed: number
+  failed: number
 }

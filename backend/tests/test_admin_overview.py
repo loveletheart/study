@@ -7,7 +7,7 @@ from pathlib import Path
 from app.common.database import connect_database, initialize_database
 from app.outfits.infrastructure.feedback import SQLiteFeedbackStore
 from app.outfits.infrastructure.weekly_batch import WeeklyBatchStore
-from app.users.application.dto import AdminOverview, FeedbackOverview, WeeklyBatchOverview
+from app.users.application.dto import AdminOverview, FeedbackOverview, WeeklyBatchHistoryEntry, WeeklyBatchOverview
 from app.users.infrastructure.admin_overview import read_admin_overview
 
 
@@ -24,7 +24,7 @@ class AdminOverviewTests(unittest.TestCase):
             AdminOverview(0, FeedbackOverview(0, 0, 0, 0), None),
         )
 
-    def test_groups_feedback_and_uses_only_latest_batch_targets(self):
+    def test_groups_feedback_and_keeps_each_batch_run_separate(self):
         SQLiteFeedbackStore(self.path).generations()
         WeeklyBatchStore(self.path, "current", lambda: datetime.now(timezone.utc))
         with closing(connect_database(self.path)) as connection, connection:
@@ -48,11 +48,12 @@ class AdminOverviewTests(unittest.TestCase):
                 )],
             )
             connection.executemany(
-                "INSERT INTO outfit_weekly_batch_runs (scope, run_date, started_at, status) VALUES (?, ?, ?, ?)",
+                "INSERT INTO outfit_weekly_batch_runs (scope, run_date, started_at, finished_at, status) "
+                "VALUES (?, ?, ?, ?, ?)",
                 [
-                    ("current", "2026-11-26", 1, "completed"),
-                    ("previous", "2026-11-27", 2, "completed"),
-                    ("current", "2026-11-27", 3, "running"),
+                    *(("current", f"2026-11-{day}", 1, 2, "completed") for day in range(21, 27)),
+                    ("previous", "2026-11-27", 2, 3, "partial_failure"),
+                    ("current", "2026-11-27", 3, None, "running"),
                 ],
             )
             connection.executemany(
@@ -69,7 +70,20 @@ class AdminOverviewTests(unittest.TestCase):
                 ],
             )
 
-        self.assertEqual(
-            read_admin_overview(self.path),
-            AdminOverview(1, FeedbackOverview(2, 1, 1, 1), WeeklyBatchOverview("2026-11-27", "running", 1, 1, 2)),
-        )
+        overview = read_admin_overview(self.path)
+        self.assertEqual(overview.registered_accounts, 1)
+        self.assertEqual(overview.feedback, FeedbackOverview(2, 1, 1, 1))
+        latest = WeeklyBatchOverview("2026-11-27", "running", 1, 1, 2)
+        self.assertEqual(overview.weekly_batch, latest)
+        history = overview.weekly_batch_history
+        self.assertEqual([entry.batch.run_date for entry in history], [
+            "2026-11-27", "2026-11-27", "2026-11-26", "2026-11-25", "2026-11-24", "2026-11-23", "2026-11-22",
+        ])
+        self.assertEqual(history[0], WeeklyBatchHistoryEntry(latest, datetime.fromtimestamp(3, timezone.utc), None))
+        self.assertEqual(history[1], WeeklyBatchHistoryEntry(
+            WeeklyBatchOverview("2026-11-27", "partial_failure", 0, 1, 0),
+            datetime.fromtimestamp(2, timezone.utc),
+            datetime.fromtimestamp(3, timezone.utc),
+        ))
+        self.assertEqual(history[2].batch, WeeklyBatchOverview("2026-11-26", "completed", 0, 1, 0))
+        self.assertEqual(history[3].batch, WeeklyBatchOverview("2026-11-25", "completed", 0, 0, 0))

@@ -2,6 +2,7 @@
 
 # 표준 라이브러리
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 # 프로젝트 모듈
@@ -60,7 +61,15 @@ class WeeklyBatchOverview:
 
 
 @dataclass(frozen=True)
+class WeeklyBatchHistoryEntry:
+    batch: WeeklyBatchOverview
+    started_at: datetime
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True)
 class AdminOverview:
     registered_accounts: int
     feedback: FeedbackOverview
     weekly_batch: WeeklyBatchOverview | None
+    weekly_batch_history: tuple[WeeklyBatchHistoryEntry, ...] = ()

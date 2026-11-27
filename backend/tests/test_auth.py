@@ -96,6 +96,7 @@ class AuthenticationTests(unittest.TestCase):
             "registered_accounts": 1,
             "feedback": {"reported": 0, "draft": 0, "approved": 0, "rejected": 0},
             "weekly_batch": None,
+            "weekly_batch_history": [],
         })
 
         self.client.post("/api/v1/users/auth/logout", headers=HEADERS)
