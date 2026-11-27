@@ -15,12 +15,15 @@ _DRESS = (
 _ONE_PIECE = re.compile(rf"{_DRESS}|점프\s*[수슈]트|오버롤|\b(?:jumpsuits?|overalls)\b")
 _HEELS = r"하이[\s-]*힐|스틸레토|\b(?:high[\s-]*heels?|stilettos?)\b"
 
-_SHARED_STYLE = re.compile(r"(?:남성\s*[/·&]\s*여성|여성\s*[/·&]\s*남성)\s*공용")
+_SHARED_STYLE_JOIN = r"\s*(?:[/·&]|및)\s*"
+_SHARED_STYLE = re.compile(rf"(?:남성{_SHARED_STYLE_JOIN}여성|여성{_SHARED_STYLE_JOIN}남성)\s*공용")
 _MENSWEAR = re.compile(
-    r"\b(?:남성|남자)\s+|(?:남성|남자)\s*(?:용|복|전용|의류)|\b(?:menswear|men['\u2019]s|for men)\b"
+    r"\b(?:남성|남자)\s+|[(\[]\s*(?:남성|남자)\s*[)\]]"
+    r"|(?:남성|남자)\s*(?:용|복|전용|의류)|\b(?:menswear|men['\u2019]s|for men)\b"
 )
 _WOMENSWEAR = re.compile(
-    r"\b(?:여성|여자)\s+|(?:여성|여자)\s*(?:용|복|전용|의류)|\b(?:womenswear|women['\u2019]s|for women)\b"
+    r"\b(?:여성|여자)\s+|[(\[]\s*(?:여성|여자)\s*[)\]]"
+    r"|(?:여성|여자)\s*(?:용|복|전용|의류)|\b(?:womenswear|women['\u2019]s|for women)\b"
     rf"|{_DRESS}|{_SKIRT}|{_HEELS}"
 )
 _OTHER_STYLE = {

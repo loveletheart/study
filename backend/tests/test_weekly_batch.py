@@ -93,7 +93,7 @@ class WeeklyBatchTests(unittest.TestCase):
                 recommendations = payload["generated"]["recommendations"]
                 worst = recommendations[-1]["worst"]
                 if len(recommendations) == 1:
-                    worst["top"] = "흰색 여성 블라우스"
+                    worst["top"] = "흰색 (여성) 블라우스"
                 else:
                     worst.update(outfit_type="one_piece", top=None, bottom=None, one_piece="흰색 드레스 셔츠")
                 connection.execute(

@@ -103,9 +103,14 @@ class OutfitContractTests(unittest.TestCase):
 
     def test_personalized_outfits_reject_explicit_opposite_style_and_keep_shared_items(self):
         for style, conflicting_names in (
-            (ClothingPreference.WOMENSWEAR, ("남성 린넨 재킷", "남성 전용 재킷", "Men\u2019s jacket", "네이비 남성 재킷")),
-            (ClothingPreference.MENSWEAR, ("여성 린넨 재킷", "여성 전용 재킷", "Women's jacket",
-                                          "원 피스", "high heels", "흰색 여성 블라우스")),
+            (ClothingPreference.WOMENSWEAR, (
+                "남성 린넨 재킷", "남성 전용 재킷", "Men\u2019s jacket", "네이비 남성 재킷",
+                "네이비 (남성) 재킷", "네이비 재킷（남성）", "네이비 [남성] 재킷",
+            )),
+            (ClothingPreference.MENSWEAR, (
+                "여성 린넨 재킷", "여성 전용 재킷", "Women's jacket", "원 피스", "high heels",
+                "흰색 여성 블라우스", "네이비 (여성) 재킷", "네이비 재킷（여성）", "네이비 [여성] 재킷",
+            )),
         ):
             preferences = OutfitPreferences(clothing_preference=style)
             recommender = OllamaOutfitRecommender(
@@ -120,7 +125,10 @@ class OutfitContractTests(unittest.TestCase):
                         with self.assertRaises(OutfitLlmResponseError):
                             recommender.recommend((self.day,))
 
-            for name in ("공용 재킷", "네이비 남성·여성 공용 재킷", "남녀 공용 재킷"):
+            for name in (
+                "공용 재킷", "네이비 남성·여성 공용 재킷", "남녀 공용 재킷",
+                "네이비 남성 및 여성 공용 재킷", "네이비 여성 및 남성 공용 재킷", "네이비 공용 (남성·여성) 재킷",
+            ):
                 with self.subTest(preference=style, shared=name):
                     payload = self.payload()
                     payload["days"][0]["best"]["outerwear"] = name
