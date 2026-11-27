@@ -24,7 +24,7 @@ import {
   safeSource,
   timeLabel,
 } from './utils'
-import type { GeneratedDay, Location, Preferences, ProfileInput, WeatherDay } from './types'
+import type { GeneratedDay, Location, Period, Preferences, ProfileInput, WeatherDay } from './types'
 
 const {
   location,
@@ -98,6 +98,10 @@ function navigate(value: View) {
     admin: 'admin',
   }[value]
   window.scrollTo({ top: 0 })
+}
+function openRecommendation(value: Period) {
+  selectPeriod(value)
+  navigate('home')
 }
 const onHashChange = () => {
   view.value = hashView()
@@ -303,14 +307,15 @@ async function choosePreferences(value: Preferences) {
   />
   <p v-else-if="view === 'review' && !accountReady" role="status">로그인 확인 중</p>
   <AdminPage
-    v-else-if="view === 'admin' && accountReady"
+    v-else-if="view === 'admin'"
     :key="account?.user.id ?? 'guest'"
+    :account-ready="accountReady"
     :signed-in="!!account"
     @close="navigate('home')"
+    @recommend="openRecommendation"
     @login="navigate('login')"
     @expired="expireSession"
   />
-  <p v-else-if="view === 'admin'" role="status">관리자 권한 확인 중</p>
   <AuthPage
     v-else-if="view === 'login' || view === 'register'"
     :mode="view"
