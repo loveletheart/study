@@ -488,13 +488,16 @@ class CachedOutfitService:
 
     def run_weekly_batch(
         self, stopped: Event | None = None, on_ready=None, force: bool = False, *, retry_failed: bool = False,
+        snapshot_personal: Callable[[Connection, CacheKey, float], str] | None = None,
     ) -> dict:
         """예약 시간이 지난 뒤 당일 배치의 미완료 대상을 처리한다."""
         now = self._clock().astimezone(KST)
         if not force and now.hour < self._weekly_batch_hour:
             return {"status": "not_due", "generated": 0, "failed": 0}
 
-        status, run, targets = self._weekly_batch.claim(now, retry_failed=retry_failed)
+        status, run, targets = self._weekly_batch.claim(
+            now, retry_failed=retry_failed, snapshot_personal=snapshot_personal,
+        )
         if run is None:
             return {"status": status, "generated": 0, "failed": 0}
 
@@ -761,22 +764,64 @@ class SQLitePersonalizedOutfitCache:
             except Exception as exc:
                 logger.warning("개인 맞춤 사전 생성 실패: kind=%s, cause=%s", target["kind"], type(exc).__name__)
 
+    @staticmethod
+    def _weekly_region_id(key: CacheKey) -> int | None:
+        parts = key[1].split(":")
+        return int(parts[1]) if len(parts) == 3 and parts[0] == "region" else None
+
+    def snapshot_weekly_preferences(self, connection: Connection, key: CacheKey, started_at: float) -> str:
+        """배치 시작 시각의 개인 조건을 보관한다."""
+        region_id = self._weekly_region_id(key)
+        if region_id is None:
+            return "[]"
+        rows = connection.execute(
+            "SELECT preferences FROM outfit_personal_targets "
+            "WHERE scope IN (?, ?) AND location_id=? AND kind='weekly' AND requested_at BETWEEN ? AND ? "
+            "GROUP BY preferences ORDER BY MAX(requested_at) DESC, preferences",
+            (self._scope, self._previous_scope, region_id, started_at - 86400, started_at),
+        )
+        return json.dumps([
+            value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+            for (value,) in rows
+        ])
+
+    def _saved_weekly_preferences(
+        self, key: CacheKey, run_date: str, check_lease: Callable[[Connection], None] | None,
+    ) -> list[str]:
+        with closing(connect_database(self._database_path)) as connection, connection:
+            if check_lease is not None:
+                connection.execute("BEGIN IMMEDIATE")
+                check_lease(connection)
+            lookup = (key[0], run_date, *key[1:])
+            row = connection.execute(
+                "SELECT run.started_at, target.personal_preferences FROM outfit_weekly_batch_targets AS target "
+                "JOIN outfit_weekly_batch_runs AS run USING (scope, run_date) "
+                "WHERE target.scope=? AND target.run_date=? AND target.kind=? "
+                "AND target.latitude=? AND target.longitude=?",
+                lookup,
+            ).fetchone()
+            if row is not None and row["personal_preferences"] is not None:
+                return json.loads(row["personal_preferences"])
+
+            started_at = row["started_at"] if row is not None else self._clock().timestamp()
+            snapshot = self.snapshot_weekly_preferences(connection, key, started_at)
+            if row is not None and check_lease is not None:
+                connection.execute(
+                    "UPDATE outfit_weekly_batch_targets SET personal_preferences=? "
+                    "WHERE scope=? AND run_date=? AND kind=? AND latitude=? AND longitude=?",
+                    (snapshot, *lookup),
+                )
+            return json.loads(snapshot)
+
     def prepare_weekly(
         self, key: CacheKey, base: WeeklyOutfitResult, stopped=None,
         *, check_lease: Callable[[Connection], None] | None = None,
     ) -> dict:
-        """주간 기본 결과가 준비된 지역부터 등록된 개인 조건을 같은 야간 작업에서 생성"""
-        parts = key[1].split(":")
-        if len(parts) != 3 or parts[0] != "region":
+        """주간 기본 결과가 준비된 지역의 원래 개인 조건을 생성한다."""
+        region_id = self._weekly_region_id(key)
+        if region_id is None:
             return {"generated": 0, "failed": 0}
-        region_id = int(parts[1])
-        with closing(connect_database(self._database_path)) as connection:
-            targets = connection.execute(
-                "SELECT preferences FROM outfit_personal_targets "
-                "WHERE scope IN (?, ?) AND location_id=? AND kind='weekly' AND requested_at>=? "
-                "GROUP BY preferences ORDER BY MAX(requested_at) DESC",
-                (self._scope, self._previous_scope, region_id, self._clock().timestamp() - 86400),
-            ).fetchall()
+        targets = self._saved_weekly_preferences(key, base.forecast.today.isoformat(), check_lease)
         generated, failed, retryable_failed = 0, 0, 0
         last_error_code = None
         for target in targets:
@@ -784,7 +829,7 @@ class SQLitePersonalizedOutfitCache:
                 break
             try:
                 _, cached = self.get(
-                    region_id, "weekly", base, PREFERENCES_ADAPTER.validate_json(target["preferences"]),
+                    region_id, "weekly", base, PREFERENCES_ADAPTER.validate_json(target),
                     register=False, from_weekly_batch=True, check_lease=check_lease,
                 )
                 generated += int(not cached)

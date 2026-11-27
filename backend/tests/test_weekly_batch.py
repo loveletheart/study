@@ -280,6 +280,59 @@ class WeeklyBatchTests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(tuple(row), ("completed", 3, "OUTFIT_LLM_TIMEOUT"))
 
+    def test_manual_recovery_reuses_personal_conditions_after_registration_ages_out(self):
+        failed = OutfitPreferences(style=OutfitStyle.FORMAL)
+        completed = OutfitPreferences(style=OutfitStyle.CASUAL)
+        registered_later = OutfitPreferences(style=OutfitStyle.DEFAULT)
+        personalizer = Mock()
+
+        def personalize(base, conditions):
+            if conditions == failed:
+                raise OutfitLlmTimeoutError()
+            return base
+
+        personalizer.personalize.side_effect = personalize
+        self.at(10)
+        personal = SQLitePersonalizedOutfitCache(
+            self.database_path, "personal", personalizer, self.cache, Mock(),
+            clock=lambda: self.fixture.now, weekly_batch_only=True,
+        )
+        failed_key = personal.register(1001, "weekly", failed)
+        personal.register(1001, "weekly", completed)
+        with self.assertRaises(WeeklyOutfitNotReadyError):
+            self.cache.get_region_weekly(1001, 37, 127)
+
+        self.at(1, days=1)
+        batch = WeeklyOutfitBatch(self.cache, personal)
+        with self.assertLogs("app.outfits.infrastructure.cache", level="WARNING"):
+            self.assertEqual(batch.refresh_due()["status"], "retry_wait")
+            self.at(1, 5)
+            self.assertEqual(batch.refresh_due()["status"], "retry_wait")
+            self.at(1, 20)
+            self.assertEqual(batch.refresh_due()["status"], "partial_failure")
+
+        self.at(11)
+        with closing(connect_database(self.database_path)) as connection, connection:
+            connection.execute("DELETE FROM outfit_personal_targets WHERE profile_key=?", (failed_key,))
+        personal.register(1001, "weekly", registered_later)
+        restarted = self.make_cache()
+        recovered_personalizer = Mock()
+        recovered_personalizer.personalize.side_effect = lambda base, conditions: base
+        recovered_personal = SQLitePersonalizedOutfitCache(
+            self.database_path, "personal", recovered_personalizer, restarted, Mock(),
+            clock=lambda: self.fixture.now, weekly_batch_only=True,
+        )
+
+        result = WeeklyOutfitBatch(restarted, recovered_personal).retry_failed()
+        self.assertEqual((result["status"], result["personalized_generated"]), ("completed", 1))
+        common = restarted.get_region_weekly(1001, 37, 127)
+        cached, cache_hit = recovered_personal.get(1001, "weekly", common, failed, register=False)
+        self.assertTrue(cache_hit)
+        self.assertEqual(len(cached.generated.recommendations), 7)
+        self.assertEqual([entry.args[1] for entry in recovered_personalizer.personalize.call_args_list], [failed])
+        with self.assertRaises(WeeklyOutfitNotReadyError):
+            recovered_personal.get(1001, "weekly", common, registered_later, register=False)
+
     def test_manual_recovery_rebuilds_common_result_if_it_was_evicted(self):
         with self.assertRaises(WeeklyOutfitNotReadyError):
             self.cache.get_weekly(37, 127)
@@ -303,11 +356,14 @@ class WeeklyBatchTests(unittest.TestCase):
         self.assertEqual(self.cache.run_weekly_batch()["status"], "completed")
         with closing(connect_database(self.database_path)) as connection, connection:
             connection.execute("ALTER TABLE outfit_weekly_batch_targets DROP COLUMN last_error_code")
+            connection.execute("ALTER TABLE outfit_weekly_batch_targets DROP COLUMN personal_preferences")
 
         self.assertEqual(self.make_cache().run_weekly_batch()["status"], "already_run")
         with closing(connect_database(self.database_path)) as connection:
-            row = connection.execute("SELECT status, last_error_code FROM outfit_weekly_batch_targets").fetchone()
-        self.assertEqual(tuple(row), ("completed", None))
+            row = connection.execute(
+                "SELECT status, last_error_code, personal_preferences FROM outfit_weekly_batch_targets"
+            ).fetchone()
+        self.assertEqual(tuple(row), ("completed", None, None))
 
     def test_missed_schedule_is_caught_up_after_a_late_start(self):
         with self.assertRaises(WeeklyOutfitNotReadyError):

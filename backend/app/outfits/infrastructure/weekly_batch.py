@@ -66,6 +66,7 @@ class WeeklyBatchStore:
                 "latitude REAL NOT NULL, longitude REAL NOT NULL, requested_at REAL NOT NULL, "
                 "common_ready INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0, "
                 "status TEXT NOT NULL DEFAULT 'pending', retry_at REAL NOT NULL DEFAULT 0, last_error_code TEXT, "
+                "personal_preferences TEXT, "
                 "PRIMARY KEY(scope, run_date, kind, latitude, longitude), "
                 "FOREIGN KEY(scope, run_date) REFERENCES outfit_weekly_batch_runs(scope, run_date) ON DELETE CASCADE)",
             )
@@ -73,8 +74,13 @@ class WeeklyBatchStore:
             target_columns = {row["name"] for row in connection.execute("PRAGMA table_info(outfit_weekly_batch_targets)")}
             if "last_error_code" not in target_columns:
                 connection.execute("ALTER TABLE outfit_weekly_batch_targets ADD COLUMN last_error_code TEXT")
+            if "personal_preferences" not in target_columns:
+                connection.execute("ALTER TABLE outfit_weekly_batch_targets ADD COLUMN personal_preferences TEXT")
 
-    def claim(self, now: datetime, *, retry_failed: bool = False) -> tuple[str, WeeklyBatchRun | None, list[WeeklyBatchTarget]]:
+    def claim(
+        self, now: datetime, *, retry_failed: bool = False,
+        snapshot_personal: Callable[[Connection, CacheKey, float], str] | None = None,
+    ) -> tuple[str, WeeklyBatchRun | None, list[WeeklyBatchTarget]]:
         run_date, timestamp = now.date().isoformat(), now.timestamp()
         with closing(connect_database(self._database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -112,10 +118,18 @@ class WeeklyBatchStore:
                     "VALUES (?, ?, ?, 'running')",
                     (self._scope, run.date, timestamp),
                 )
+                started_at = legacy_started_at if legacy_started_at is not None else timestamp
                 connection.executemany(
                     "INSERT INTO outfit_weekly_batch_targets "
-                    "(scope, run_date, kind, latitude, longitude, requested_at, common_ready) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    ((self._scope, run.date, *target.key[1:], target.requested_at, target.common_ready) for target in targets),
+                    "(scope, run_date, kind, latitude, longitude, requested_at, common_ready, personal_preferences) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            self._scope, run.date, *target.key[1:], target.requested_at, target.common_ready,
+                            snapshot_personal(connection, target.key, started_at) if snapshot_personal is not None else None,
+                        )
+                        for target in targets
+                    ],
                 )
             else:
                 rows = connection.execute(
